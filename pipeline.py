@@ -31,9 +31,10 @@ except ImportError:
 # CONSTANTES
 # ─────────────────────────────────────────────────────────────────────────────
 
-
+# Features do modelo — NÃO incluir as que definem o target (data leakage):
 # Removidas: 'sacado_indice_liquidez_1m', 'score_materialidade_v2', 'media_atraso_dias'
-
+# Essas três são exatamente as condições usadas em definir_target() para criar o target.
+# Incluí-las faria o modelo aprender a regra em vez de padrões reais de crédito.
 FEATURES = [
     'cedente_indice_liquidez_1m',
     'score_materialidade_evolucao',

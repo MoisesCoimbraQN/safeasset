@@ -540,6 +540,10 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
     resumo_dup   = fraude['resumo_duplicatas']
     perfil_cnae  = R['perfil_cnae']
 
+    # macro vazio por padrão — preenchido pelo update_macro_content separadamente
+    # Usado apenas para o semáforo setorial no Resumo (se já disponível no R)
+    macro = R.get('macro') or {}
+
     # ── KPIs principais ───────────────────────────────────────────────────
     total       = len(df_full)
     rating_ct   = df_full['rating_carteira'].value_counts()
