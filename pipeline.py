@@ -31,10 +31,9 @@ except ImportError:
 # CONSTANTES
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Features do modelo — NÃO incluir as que definem o target (data leakage):
+
 # Removidas: 'sacado_indice_liquidez_1m', 'score_materialidade_v2', 'media_atraso_dias'
-# Essas três são exatamente as condições usadas em definir_target() para criar o target.
-# Incluí-las faria o modelo aprender a regra em vez de padrões reais de crédito.
+
 FEATURES = [
     'cedente_indice_liquidez_1m',
     'score_materialidade_evolucao',
@@ -204,23 +203,25 @@ def detectar_duplicatas(df_bol: pd.DataFrame,
     df['flag_duplicata'] = ((df['flag_dup_id'] == 1) | (df['flag_dup_conteudo'] == 1)).astype(int)
 
     # ── Resumo dos grupos duplicados ─────────────────────────────────────
-    dup_id = (df[df['flag_dup_id'] == 1]
-              .groupby('id_boleto')
-              .agg(qtd_ocorrencias=('id_boleto', 'count'),
-                   id_pagador=('id_pagador', 'first'),
-                   vlr_nominal=('vlr_nominal', 'first'))
-              .reset_index()
-              .assign(tipo_duplicata='ID repetido'))
+    # Usando merge para evitar conflito de nomes no reset_index (pandas 2+)
+    _dup_id_grp = (df[df['flag_dup_id'] == 1]
+                   .groupby('id_boleto', as_index=False)
+                   .agg(qtd_ocorrencias=('id_boleto', 'count'),
+                        id_pagador=('id_pagador', 'first'),
+                        vlr_nominal=('vlr_nominal', 'first'))
+                   .assign(tipo_duplicata='ID repetido'))
+    # Renomear id_boleto para evitar conflito no reset_index
+    dup_id = _dup_id_grp[['id_pagador', 'vlr_nominal',
+                           'qtd_ocorrencias', 'tipo_duplicata']].copy()
 
-    dup_cont = (df[df['flag_dup_conteudo'] == 1]
-                .groupby(chave_cols_str)
-                .agg(qtd_ocorrencias=('id_boleto', 'count'))
-                .reset_index()
-                .rename(columns={'vlr_nominal': 'vlr_nominal',
-                                 '_dt_venc_str': 'dt_vencimento'})
-                .assign(tipo_duplicata='Conteúdo idêntico'))
+    _dup_cont_grp = (df[df['flag_dup_conteudo'] == 1]
+                     .groupby(chave_cols_str, as_index=False)
+                     .agg(qtd_ocorrencias=('id_boleto', 'count'))
+                     .rename(columns={'_dt_venc_str': 'dt_vencimento'}))
+    dup_cont = _dup_cont_grp[['id_pagador', 'vlr_nominal',
+                               'qtd_ocorrencias']].copy()
+    dup_cont['tipo_duplicata'] = 'Conteúdo idêntico'
 
-    resumo_cols = ['id_pagador', 'vlr_nominal', 'qtd_ocorrencias', 'tipo_duplicata']
     resumo = pd.concat([
         dup_id[['id_pagador', 'vlr_nominal', 'qtd_ocorrencias', 'tipo_duplicata']],
         dup_cont[['id_pagador', 'vlr_nominal', 'qtd_ocorrencias', 'tipo_duplicata']],
