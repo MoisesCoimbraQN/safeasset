@@ -214,8 +214,7 @@ def detectar_duplicatas(df_bol: pd.DataFrame,
 
     dup_cont = (df[df['flag_dup_conteudo'] == 1]
                 .groupby(chave_cols_str)
-                .agg(qtd_ocorrencias=('id_boleto', 'count'),
-                     id_pagador=('id_pagador', 'first'))
+                .agg(qtd_ocorrencias=('id_boleto', 'count'))
                 .reset_index()
                 .rename(columns={'vlr_nominal': 'vlr_nominal',
                                  '_dt_venc_str': 'dt_vencimento'})
@@ -278,7 +277,6 @@ def detectar_duplicatas(df_bol: pd.DataFrame,
         'fraude_por_cnpj':  fraude_cnpj,
         'stats':            stats,
     }
-
 
 
 # ─────────────────────────────────────────────────────────────────────────────
