@@ -31,14 +31,16 @@ except ImportError:
 # CONSTANTES
 # ─────────────────────────────────────────────────────────────────────────────
 
+
+# Removidas: 'sacado_indice_liquidez_1m', 'score_materialidade_v2', 'media_atraso_dias' - estão no target
 FEATURES = [
-    'sacado_indice_liquidez_1m', 'cedente_indice_liquidez_1m',
-    'score_materialidade_evolucao', 'media_atraso_dias',
-    'indicador_liquidez_quantitativo_3m', 'share_vl_inad_pag_bol_6_a_15d',
-    'score_quantidade_v2', 'score_materialidade_v2',
+    'cedente_indice_liquidez_1m',
+    'score_materialidade_evolucao',
+    'indicador_liquidez_quantitativo_3m',
+    'share_vl_inad_pag_bol_6_a_15d',
+    'score_quantidade_v2',
     'bol_qtd_total', 'bol_pct_atrasado', 'bol_pct_sem_pgto',
-    'bol_taxa_recuperacao', 'bol_atraso_medio', 'bol_pct_protestado',
-]
+    'bol_taxa_recuperacao', 'bol_atraso_medio', 'bol_pct_protestado',]
 
 RATING_COLOR = {
     'A — Excelente':      '#00ff88',
