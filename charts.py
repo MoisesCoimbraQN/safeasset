@@ -643,3 +643,80 @@ def fig_componentes_score_macro(score_detalhe: dict, setor: str) -> go.Figure:
                     angularaxis=dict(gridcolor=BORDER, color=MUTED, tickfont=dict(size=10)),
                     bgcolor='rgba(0,0,0,0)',
                 ))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PRODUTO 2 — Probabilidade ML vs Score FIDC
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fig_divergencia_ml(df_full: pd.DataFrame) -> go.Figure:
+    """
+    Scatter: Score FIDC (eixo X) vs Probabilidade ML de ser bom (eixo Y).
+    Cada ponto é um CNPJ. Quadrantes de divergência destacados.
+    """
+    if 'prob_ml_bom' not in df_full.columns:
+        return go.Figure()
+
+    df = df_full.copy()
+    df['diverge'] = df['alerta_divergencia'].map({0: 'Consenso', 1: 'Divergência'})
+    df['cor'] = df['diverge'].map({'Consenso': ACCENT, 'Divergência': WARN})
+
+    fig = go.Figure()
+
+    for grupo, cor in [('Consenso', ACCENT), ('Divergência', WARN)]:
+        d = df[df['diverge'] == grupo]
+        fig.add_trace(go.Scatter(
+            x=d['score_fidc'], y=d['prob_ml_bom'],
+            mode='markers', name=grupo,
+            marker=dict(size=6, color=cor, opacity=0.65),
+            customdata=d[['id_cnpj', 'rating_carteira']].values,
+            hovertemplate=(
+                "<b>%{customdata[0]}</b><br>"
+                "Score FIDC: %{x}<br>"
+                "Prob. ML (bom): %{y:.1f}%<br>"
+                "Rating: %{customdata[1]}<extra></extra>"
+            ),
+        ))
+
+    # Linhas de corte
+    fig.add_vline(x=700, line_dash="dash", line_color=MUTED, line_width=1)
+    fig.add_vline(x=400, line_dash="dash", line_color=MUTED, line_width=1)
+    fig.add_hline(y=60,  line_dash="dash", line_color=MUTED, line_width=1)
+    fig.add_hline(y=40,  line_dash="dash", line_color=MUTED, line_width=1)
+
+    # Anotações dos quadrantes de divergência
+    fig.add_annotation(x=820, y=20, text="⚠️ Score alto<br>ML pessimista",
+                       showarrow=False, font=dict(color=WARN, size=10),
+                       bgcolor=CARD_BG, bordercolor=WARN, borderwidth=1)
+    fig.add_annotation(x=200, y=80, text="⚠️ Score baixo<br>ML otimista",
+                       showarrow=False, font=dict(color=WARN, size=10),
+                       bgcolor=CARD_BG, bordercolor=WARN, borderwidth=1)
+
+    return _fig(fig, height=440,
+                margin=dict(l=70, r=30, t=30, b=70),
+                xaxis=dict(title='Score FIDC (0–1000)', range=[0, 1050]),
+                yaxis=dict(title='Probabilidade ML — bom (%)', range=[-5, 105]),
+                legend=dict(orientation='h', y=1.06, font=dict(size=11)))
+
+
+def fig_prob_ml_hist(df_full: pd.DataFrame) -> go.Figure:
+    """Histograma da distribuição da probabilidade ML por rating."""
+    if 'prob_ml_bom' not in df_full.columns:
+        return go.Figure()
+
+    fig = go.Figure()
+    for rating, cor in RATING_COLOR.items():
+        d = df_full[df_full['rating_carteira'] == rating]
+        if d.empty:
+            continue
+        fig.add_trace(go.Histogram(
+            x=d['prob_ml_bom'], name=rating,
+            marker_color=cor, opacity=0.75,
+            nbinsx=20,
+        ))
+
+    return _fig(fig, height=360, barmode='overlay',
+                margin=dict(l=70, r=30, t=30, b=60),
+                xaxis_title='Probabilidade ML — bom (%)',
+                yaxis_title='Qtd de CNPJs',
+                legend=dict(orientation='h', y=1.06, font=dict(size=10)))

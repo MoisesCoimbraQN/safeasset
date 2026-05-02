@@ -31,8 +31,10 @@ except ImportError:
 # CONSTANTES
 # ─────────────────────────────────────────────────────────────────────────────
 
-
-# Removidas: 'sacado_indice_liquidez_1m', 'score_materialidade_v2', 'media_atraso_dias' - estão no target
+# Features do modelo — NÃO incluir as que definem o target (data leakage):
+# Removidas: 'sacado_indice_liquidez_1m', 'score_materialidade_v2', 'media_atraso_dias'
+# Essas três são exatamente as condições usadas em definir_target() para criar o target.
+# Incluí-las faria o modelo aprender a regra em vez de padrões reais de crédito.
 FEATURES = [
     'cedente_indice_liquidez_1m',
     'score_materialidade_evolucao',
@@ -40,7 +42,8 @@ FEATURES = [
     'share_vl_inad_pag_bol_6_a_15d',
     'score_quantidade_v2',
     'bol_qtd_total', 'bol_pct_atrasado', 'bol_pct_sem_pgto',
-    'bol_taxa_recuperacao', 'bol_atraso_medio', 'bol_pct_protestado',]
+    'bol_taxa_recuperacao', 'bol_atraso_medio', 'bol_pct_protestado',
+]
 
 RATING_COLOR = {
     'A — Excelente':      '#00ff88',
@@ -211,7 +214,8 @@ def detectar_duplicatas(df_bol: pd.DataFrame,
 
     dup_cont = (df[df['flag_dup_conteudo'] == 1]
                 .groupby(chave_cols_str)
-                .agg(qtd_ocorrencias=('id_boleto', 'count')) # REMOVED: id_pagador=('id_pagador', 'first')
+                .agg(qtd_ocorrencias=('id_boleto', 'count'),
+                     id_pagador=('id_pagador', 'first'))
                 .reset_index()
                 .rename(columns={'vlr_nominal': 'vlr_nominal',
                                  '_dt_venc_str': 'dt_vencimento'})
@@ -274,7 +278,6 @@ def detectar_duplicatas(df_bol: pd.DataFrame,
         'fraude_por_cnpj':  fraude_cnpj,
         'stats':            stats,
     }
-
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -442,6 +445,65 @@ def calcular_feature_importance(ml_results: dict, avail: list,
     return pd.Series(imp, index=avail).sort_values(ascending=False)
 
 
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PRODUTO 2 — Probabilidade ML (segunda opinião independente)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def calcular_prob_ml(df_full: pd.DataFrame,
+                     ml_results: dict,
+                     avail: list,
+                     best_name: str) -> pd.DataFrame:
+    """
+    Adiciona ao df_full duas colunas com a "segunda opinião" do modelo ML:
+
+      prob_ml_bom   : probabilidade (0–1) de o CNPJ ser classificado como bom
+                      pelo melhor modelo treinado. Usa predict_proba() sobre
+                      TODOS os CNPJs (não só o conjunto de teste).
+
+      alerta_divergencia : flag de divergência entre score de negócio e modelo ML.
+                           1 quando os dois discordam sobre a qualidade do CNPJ:
+                           - Score FIDC alto (>= 700) mas prob_ml_bom baixa (< 0.40)
+                           - Score FIDC baixo (<  400) mas prob_ml_bom alta (>= 0.60)
+
+    Parâmetros
+    ----------
+    df_full    : DataFrame completo com score_fidc já calculado
+    ml_results : dicionário com os modelos treinados
+    avail      : lista de features disponíveis (sem leakage)
+    best_name  : nome do melhor modelo (maior AUC)
+
+    Retorna
+    -------
+    df_full com colunas prob_ml_bom e alerta_divergencia adicionadas
+    """
+    df = df_full.copy()
+
+    # Obter pipeline treinado do melhor modelo
+    pipe = ml_results[best_name]['pipe']
+
+    # Preparar features — apenas linhas sem NaN nas features disponíveis
+    X_todos = df[avail].copy()
+    idx_validos = X_todos.dropna().index
+
+    # Calcular probabilidade para todos os CNPJs válidos
+    prob = np.zeros(len(df))
+    if len(idx_validos) > 0:
+        probs = pipe.predict_proba(X_todos.loc[idx_validos])
+        # Coluna 1 = probabilidade da classe positiva (bom = 1)
+        prob[df.index.get_indexer(idx_validos)] = probs[:, 1]
+
+    df['prob_ml_bom'] = (prob * 100).round(1)  # em percentual 0–100
+
+    # Flag de divergência
+    df['alerta_divergencia'] = (
+        ((df['score_fidc'] >= 700) & (df['prob_ml_bom'] <  40)) |
+        ((df['score_fidc'] <  400) & (df['prob_ml_bom'] >= 60))
+    ).astype(int)
+
+    return df
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PASSO 11 — SCORE FINAL (fórmula composta ponderada)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -546,7 +608,10 @@ def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
     result['best_name'] = best_name
     result['feat_imp']  = calcular_feature_importance(ml_results, avail, best_name)
 
-    df_full           = calcular_score_final(df_full)
+    df_full = calcular_score_final(df_full)
+
+    # Produto 2 — probabilidade ML como segunda opinião independente
+    df_full = calcular_prob_ml(df_full, ml_results, avail, best_name)
     result['df_full'] = df_full
 
     # Perfil setorial por CNAE (roda após score para incluir rating no agregado)
