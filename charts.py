@@ -24,6 +24,10 @@ WARN   = '#ff6b35'
 MUTED  = '#8892a4'
 BORDER = '#1e3a5f'
 WHITE  = '#e8f0fe'
+CARD_BG = '#111d2e'
+AMBER  = '#F59E0B'
+
+from pipeline import RATING_COLOR
 
 # Template base para todos os gráficos (fundo transparente, fonte clara)
 BASE_LAYOUT = dict(
