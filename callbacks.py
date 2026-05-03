@@ -18,6 +18,7 @@ from layout import (card, kpi, section_title, build_rank_table,
                     ACCENT, ACCENT2, WARN, MUTED, BORDER, WHITE, NAVY, BLUE, CARD_BG)
 # Aliases de compatibilidade — tema escuro
 DARK   = WHITE    # texto claro sobre fundo escuro
+AMBER  = '#F59E0B'  # âmbar — usado em alertas e destaques
 BG_MAIN = CARD_BG # fundo dos cards
 from pipeline import RATING_COLOR
 
