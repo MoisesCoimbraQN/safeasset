@@ -497,10 +497,12 @@ def calcular_prob_ml(df_full: pd.DataFrame,
 
     df['prob_ml_bom'] = (prob * 100).round(1)  # em percentual 0–100
 
-    # Flag de divergência
+    # Flag de divergência — thresholds mais conservadores para alertar apenas casos de discordância clara
+    # Score muito alto (≥ 800) mas ML muito pessimista (< 30%): risco oculto
+    # Score muito baixo (< 300) mas ML muito otimista (≥ 70%): oportunidade ignorada
     df['alerta_divergencia'] = (
-        ((df['score_fidc'] >= 700) & (df['prob_ml_bom'] <  40)) |
-        ((df['score_fidc'] <  400) & (df['prob_ml_bom'] >= 60))
+        ((df['score_fidc'] >= 800) & (df['prob_ml_bom'] <  30)) |
+        ((df['score_fidc'] <  300) & (df['prob_ml_bom'] >= 70))
     ).astype(int)
 
     return df
