@@ -465,7 +465,7 @@ def calcular_prob_ml(df_full: pd.DataFrame,
 
       alerta_divergencia : flag de divergência entre score de negócio e modelo ML.
                            1 quando os dois discordam sobre a qualidade do CNPJ:
-                           - Score FIDC alto (>= 700) mas prob_ml_bom baixa (< 0.40)
+                           - Score FIDC alto (>= 800) mas prob_ml_bom baixa (< 0.30)
                            - Score FIDC baixo (<  400) mas prob_ml_bom alta (>= 0.60)
 
     Parâmetros
@@ -497,7 +497,7 @@ def calcular_prob_ml(df_full: pd.DataFrame,
 
     df['prob_ml_bom'] = (prob * 100).round(1)  # em percentual 0–100
 
-    # Flag de divergência — thresholds mais conservadores para alertar apenas casos de discordância clara
+    # Flag de divergência — thresholds mais conservadores
     # Score muito alto (≥ 800) mas ML muito pessimista (< 30%): risco oculto
     # Score muito baixo (< 300) mas ML muito otimista (≥ 70%): oportunidade ignorada
     df['alerta_divergencia'] = (
@@ -560,7 +560,7 @@ def calcular_score_final(df_full: pd.DataFrame) -> pd.DataFrame:
 
 def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
                  test_size: float = 0.2, n_estimators: int = 300,
-                 liq_thresh: float = 0.70, mat_thresh: float = 900,
+                 liq_thresh: float = 0.70, mat_thresh: float = 750,
                  pct_dup_thresh: float = FRAUDE_PCT_DUP_THRESH,
                  n_emitentes_thresh: int = FRAUDE_N_EMITENTES_THRESH) -> dict:
     """

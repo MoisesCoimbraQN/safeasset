@@ -296,7 +296,7 @@ def register_callbacks(app):
                 test_size          = test_size  or 0.2,
                 n_estimators       = n_trees    or 300,
                 liq_thresh         = liq_thresh or 0.70,
-                mat_thresh         = mat_thresh or 900,
+                mat_thresh         = mat_thresh or 750,
                 pct_dup_thresh     = (dup_thresh  or 5)  / 100,
                 n_emitentes_thresh = emit_thresh or 10,
             )
@@ -311,7 +311,7 @@ def register_callbacks(app):
             ], style={'padding': '24px'}), ''
 
         # ── Montar dashboard ──────────────────────────────────────────────
-        dashboard = build_dashboard(R, liq_thresh or 0.70, mat_thresh or 900)
+        dashboard = build_dashboard(R, liq_thresh or 0.70, mat_thresh or 750)
         return dashboard, ''
 
     # ── Filtros do ranking ─────────────────────────────────────────────────
@@ -338,7 +338,7 @@ def register_callbacks(app):
         df_bol = read_json(bol_json)
         R = pl.run_pipeline(df_aux.copy(), df_bol.copy(),
                              test_size=test_size or 0.2, n_estimators=n_trees or 300,
-                             liq_thresh=liq_thresh or 0.70, mat_thresh=mat_thresh or 900)
+                             liq_thresh=liq_thresh or 0.70, mat_thresh=mat_thresh or 750)
         return build_rank_table(R['df_full'], cnpj_q, sel_ufs, sel_cnaes, sel_ratings, score_range)
 
     # ── CALLBACK MACRO — dispara quando aba é aberta ou store muda ──────
@@ -717,12 +717,12 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                         dbc.Col(kpi(
                             'Score Alto + ML Pessimista',
                             f'{int(((df_full["score_fidc"]>=700)&(df_full["prob_ml_bom"]<40)).sum()):,}',
-                            'Score ≥ 700  ·  ML < 40% — risco oculto',
+                            'Score ≥ 800  ·  ML < 30% — risco oculto',
                             WARN), width=3),
                         dbc.Col(kpi(
                             'Score Baixo + ML Otimista',
                             f'{int(((df_full["score_fidc"]<400)&(df_full["prob_ml_bom"]>=60)).sum()):,}',
-                            'Score < 400  ·  ML ≥ 60% — oportunidade',
+                            'Score < 300  ·  ML ≥ 70% — oportunidade',
                             ACCENT2), width=3),
                         dbc.Col(kpi(
                             'Sem Divergência',
@@ -942,10 +942,10 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                             'carteira geral', ACCENT), width=3),
                         dbc.Col(kpi('Score Alto + ML Pessimista',
                             f'{int(((df_full["score_fidc"]>=700)&(df_full["prob_ml_bom"]<40)).sum()):,}',
-                            'score ≥ 700, ML < 40%', WARN), width=3),
+                            'score ≥ 800, ML < 30%', WARN), width=3),
                         dbc.Col(kpi('Score Baixo + ML Otimista',
                             f'{int(((df_full["score_fidc"]<400)&(df_full["prob_ml_bom"]>=60)).sum()):,}',
-                            'score < 400, ML ≥ 60%', ACCENT2), width=3),
+                            'score < 300, ML ≥ 70%', ACCENT2), width=3),
                     ], className='g-3', style={'marginBottom': '16px'}),
                     dbc.Row([
                         dbc.Col([card([
