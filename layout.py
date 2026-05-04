@@ -148,9 +148,19 @@ def build_sidebar():
                                'marginBottom': '12px'}),
         ]),
 
-        # Parâmetros ML
-        card([
-            html.Div('⚙️ Parâmetros ML', style={'fontWeight': '600', 'marginBottom': '14px', 'fontSize': '14px'}),
+        # Parâmetros ML — recolhível
+        html.Details(open=False, style={'marginBottom': '12px'}, children=[
+            html.Summary('⚙️  Parâmetros ML', style={
+                'fontWeight': '600', 'fontSize': '13px', 'color': WHITE,
+                'cursor': 'pointer', 'padding': '10px 14px',
+                'background': BLUE, 'borderRadius': '8px',
+                'border': f'1px solid {BORDER}', 'listStyle': 'none',
+                'userSelect': 'none',
+            }),
+        html.Div(style={'background': CARD_BG, 'border': f'1px solid {BORDER}',
+                        'borderTop': 'none', 'borderRadius': '0 0 8px 8px',
+                        'padding': '14px'}, children=[
+            html.Div('⚙️ Parâmetros ML', style={'fontWeight': '600', 'marginBottom': '14px', 'fontSize': '14px', 'display': 'none'}),
             label_sm('Tamanho do teste'),
             dcc.Slider(id='sl-test', min=0.15, max=0.35, step=0.05, value=0.20,
                        marks={0.15:{'label':'15%','style':{'color':'#8892a4','fontSize':'10px'}},0.20:{'label':'20%','style':{'color':'#00d4ff','fontSize':'10px'}},0.25:{'label':'25%','style':{'color':'#8892a4','fontSize':'10px'}},0.30:{'label':'30%','style':{'color':'#8892a4','fontSize':'10px'}},0.35:{'label':'35%','style':{'color':'#8892a4','fontSize':'10px'}}},
@@ -171,10 +181,21 @@ def build_sidebar():
                        marks={700:{'label':'700','style':{'color':'#8892a4','fontSize':'10px'}},850:{'label':'850','style':{'color':'#8892a4','fontSize':'10px'}},970:{'label':'970','style':{'color':'#00d4ff','fontSize':'10px'}}},
                        tooltip={'always_visible': False}),
         ]),
+        ]),
 
-        # Detecção de Fraude
-        card([
-            html.Div('🚨 Detecção de Fraude', style={'fontWeight': '600', 'marginBottom': '4px', 'fontSize': '14px'}),
+        # Detecção de Fraude — recolhível
+        html.Details(open=False, style={'marginBottom': '12px'}, children=[
+            html.Summary('🚨  Detecção de Fraude', style={
+                'fontWeight': '600', 'fontSize': '13px', 'color': WARN,
+                'cursor': 'pointer', 'padding': '10px 14px',
+                'background': BLUE, 'borderRadius': '8px',
+                'border': f'1px solid {BORDER}', 'listStyle': 'none',
+                'userSelect': 'none',
+            }),
+        html.Div(style={'background': CARD_BG, 'border': f'1px solid {BORDER}',
+                        'borderTop': 'none', 'borderRadius': '0 0 8px 8px',
+                        'padding': '14px'}, children=[
+            html.Div('🚨 Detecção de Fraude', style={'fontWeight': '600', 'marginBottom': '4px', 'fontSize': '14px', 'display': 'none'}),
             html.Div('Thresholds para flag de risco',
                      style={'fontSize': '10px', 'color': WARN, 'marginBottom': '12px', 'fontStyle': 'italic'}),
             label_sm('% mín. boletos duplicados'),
@@ -192,6 +213,7 @@ def build_sidebar():
                                'padding': '8px', 'fontWeight': '700', 'cursor': 'pointer',
                                'fontFamily': "'Space Grotesk',sans-serif", 'fontSize': '12px',
                                'marginTop': '10px'}),
+        ]),
         ]),
 
         # Filtros globais
@@ -241,7 +263,8 @@ def build_header():
             html.Div([
                 badge_step(i, s) for i, s in enumerate([
                     'Carga', 'Fraude', 'EDA', 'Feat.Eng',
-                    'Target', 'Correlação', 'ML', 'Score', 'CNAE', 'Macro',
+                    'Target', 'Correlação', 'ML+ROC',
+                    'Score', 'CNAE', 'Macro',
                 ], 1)
             ], style={'display': 'flex', 'alignItems': 'center', 'flexWrap': 'wrap', 'gap': '6px'}),
         ], style={'maxWidth': '1400px', 'margin': '0 auto', 'padding': '16px 24px',

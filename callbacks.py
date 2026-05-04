@@ -253,10 +253,9 @@ def register_callbacks(app):
         if not bol_json:
             return html.Div([
                 html.Div('📂', style={'fontSize': '48px', 'marginBottom': '12px'}),
-                html.Div('Base auxiliar carregada ✅ — aguardando base de boletos…',
-                         style={'color': MUTED, 'fontSize': '15px'}),
-                html.Div('Faça o upload do arquivo base_boletos_fiap.csv',
-                         style={'color': WARN, 'fontSize': '13px', 'marginTop': '6px'}),
+                html.Div('Base auxiliar carregada ✅', style={'color': ACCENT2, 'fontSize': '15px'}),
+                html.Div('Agora faça o upload do arquivo base_boletos_fiap.csv',
+                         style={'color': MUTED, 'fontSize': '13px', 'marginTop': '6px'}),
             ], style={'textAlign': 'center', 'padding': '60px'}), ''
 
         try:
@@ -797,6 +796,82 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
 
               ])]),
 
+            # ── ANÁLISE DE FRAUDE ─────────────────────────────────────────
+            dcc.Tab(label='🚨 Fraude', value='tab-fraude', style=tab_style, selected_style={**tab_sel, 'background': WARN, 'color': NAVY},
+              children=[html.Div(style={'padding': '24px'}, children=[
+                section_title('2B. Detecção de Boletos Duplicados',
+                    f'Threshold: ≥ {fraude_stats["pct_dup_thresh"]*100:.0f}% duplicados  OU  ≥ {fraude_stats["n_emit_thresh"]} emitentes distintos'),
+
+                # KPIs de fraude
+                dbc.Row([
+                    dbc.Col(kpi('Total Duplicatas',    f'{fraude_stats["total_duplicatas"]:,}',
+                                f'{fraude_stats["pct_duplicatas"]:.1f}% da base', WARN), width=3),
+                    dbc.Col(kpi('Dup. por ID',         f'{fraude_stats["total_dup_id"]:,}',
+                                'mesmo id_boleto repetido', WARN), width=3),
+                    dbc.Col(kpi('Dup. por Conteúdo',   f'{fraude_stats["total_dup_conteudo"]:,}',
+                                'valor+venc+pagador+benef', WARN), width=3),
+                    dbc.Col(kpi('CNPJs Suspeitos',      f'{fraude_stats["cnpjs_suspeitos"]:,}',
+                                f'de {fraude_stats["total_cnpjs_com_boleto"]:,} c/ boletos', WARN), width=3),
+                ], className='g-3', style={'marginBottom': '20px'}),
+
+                dbc.Row([
+                    dbc.Col([
+                        card([html.Div('Tipos de duplicata detectados', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
+                              G(ch.fig_duplicatas_tipo(fraude_stats))]),
+                    ], width=5),
+                    dbc.Col([
+                        card([html.Div('Concentração de emitentes por pagador', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
+                              G(ch.fig_emitentes_por_pagador(fraude_cnpj))]),
+                    ], width=7),
+                ], className='g-3'),
+
+                card([html.Div('Top CNPJs por % de boletos duplicados  (laranja = flag de risco ativado)', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
+                      G(ch.fig_top_cnpjs_suspeitos(fraude_cnpj))]),
+
+                card([html.Div('Score FIDC vs % duplicados — CNPJs suspeitos em destaque', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
+                      G(ch.fig_scatter_fraude(df_full))]),
+
+                card([html.Div('Grupos de boletos duplicados com maior incidência', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
+                      G(ch.fig_resumo_duplicatas(resumo_dup))]),
+
+                # Tabela de CNPJs suspeitos
+                card([
+                    html.Div('CNPJs com flag de risco de fraude', style={'fontSize': '14px', 'fontWeight': '600', 'marginBottom': '12px', 'color': WARN}),
+                    *([] if fraude_cnpj[fraude_cnpj['flag_risco_fraude'] == 1].empty else [
+                        dash_table.DataTable(
+                            data=fraude_cnpj[fraude_cnpj['flag_risco_fraude'] == 1]
+                                .sort_values('bol_pct_duplicado', ascending=False)
+                                [['id_pagador', 'bol_qtd_total', 'bol_qtd_dup_total',
+                                  'bol_pct_duplicado', 'bol_n_emitentes', 'motivo_alerta']]
+                                .rename(columns={
+                                    'id_pagador': 'CNPJ', 'bol_qtd_total': 'Total Bol.',
+                                    'bol_qtd_dup_total': 'Duplicatas', 'bol_pct_duplicado': '% Dup.',
+                                    'bol_n_emitentes': 'Emitentes', 'motivo_alerta': 'Motivo'})
+                                .assign(**{'% Dup.': lambda d: (d['% Dup.'] * 100).round(1).astype(str) + '%'})
+                                .to_dict('records'),
+                            columns=[{'name': c, 'id': c} for c in
+                                     ['CNPJ', 'Total Bol.', 'Duplicatas', '% Dup.', 'Emitentes', 'Motivo']],
+                            page_size=15, sort_action='native',
+                            style_table={'overflowX': 'auto'},
+                            style_cell={'backgroundColor': CARD_BG, 'color': WHITE,
+                                        'border': f'1px solid {BORDER}', 'fontFamily': 'Space Grotesk',
+                                        'fontSize': '12px', 'padding': '8px 12px', 'textAlign': 'left'},
+                            style_header={'backgroundColor': BLUE, 'fontWeight': '700',
+                                          'color': WARN, 'border': f'1px solid {BORDER}', 'fontSize': '12px'},
+                            style_data_conditional=[
+                                {'if': {'filter_query': '{Motivo} contains "Duplicatas" && {Motivo} contains "Emitentes"'},
+                                 'backgroundColor': '#2d0a0a', 'color': '#ff6b6b', 'fontWeight': '600'},
+                                {'if': {'row_index': 'odd'}, 'backgroundColor': '#0d1b2a'},
+                            ],
+                        )
+                    ]),
+                    html.Div('Nenhum CNPJ suspeito encontrado com os thresholds atuais.',
+                             style={'color': ACCENT2, 'fontSize': '13px', 'padding': '12px 0'})
+                    if fraude_cnpj[fraude_cnpj['flag_risco_fraude'] == 1].empty else html.Div(),
+                ]),
+              ])]),
+
+
             # ── TARGET & CORRELAÇÃO ───────────────────────────────────────
             dcc.Tab(label='🎯 Target & Correlação', style=tab_style, selected_style=tab_sel,
               children=[html.Div(style={'padding': '24px'}, children=[
@@ -832,15 +907,12 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                 card([html.Div('AUC-ROC por Fold — Cross-Validation (k=5)', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_cv_folds(ml))]),
                 card([html.Div('CV AUC vs Test AUC — comparação entre modelos', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_cv_vs_test(ml))]),
                 card([html.Div(f'Importância das Features — {best_name}', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_feature_importance(feat_imp, best_name))]),
-              ])]),
-
-            # ── ROC & CONFUSÃO ────────────────────────────────────────────
-            dcc.Tab(label='📈 ROC & Confusão', style=tab_style, selected_style=tab_sel,
-              children=[html.Div(style={'padding': '24px'}, children=[
-                section_title('9. Avaliação dos Modelos', 'Curvas ROC e Matrizes de Confusão'),
+                html.Hr(style={'borderColor': BORDER, 'margin': '20px 0'}),
+                section_title('Avaliação dos Modelos', 'Curvas ROC e Matrizes de Confusão'),
                 card([html.Div('Curvas ROC — Comparação entre Modelos', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_roc(ml))]),
                 card([html.Div('Matrizes de Confusão — por Modelo', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_confusion_matrix(ml))]),
               ])]),
+
 
             # ── SCORE FINAL ───────────────────────────────────────────────
             dcc.Tab(label='🥇 Score Final', value='tab-score', style=tab_style, selected_style=tab_sel,
@@ -926,82 +998,6 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                                   'padding': '9px 20px', 'display': 'inline-block', 'marginTop': '8px'}),
                 ]),
               ])]),
-
-            # ── ANÁLISE DE FRAUDE ─────────────────────────────────────────
-            dcc.Tab(label='🚨 Fraude', value='tab-fraude', style=tab_style, selected_style={**tab_sel, 'background': WARN, 'color': NAVY},
-              children=[html.Div(style={'padding': '24px'}, children=[
-                section_title('2B. Detecção de Boletos Duplicados',
-                    f'Threshold: ≥ {fraude_stats["pct_dup_thresh"]*100:.0f}% duplicados  OU  ≥ {fraude_stats["n_emit_thresh"]} emitentes distintos'),
-
-                # KPIs de fraude
-                dbc.Row([
-                    dbc.Col(kpi('Total Duplicatas',    f'{fraude_stats["total_duplicatas"]:,}',
-                                f'{fraude_stats["pct_duplicatas"]:.1f}% da base', WARN), width=3),
-                    dbc.Col(kpi('Dup. por ID',         f'{fraude_stats["total_dup_id"]:,}',
-                                'mesmo id_boleto repetido', WARN), width=3),
-                    dbc.Col(kpi('Dup. por Conteúdo',   f'{fraude_stats["total_dup_conteudo"]:,}',
-                                'valor+venc+pagador+benef', WARN), width=3),
-                    dbc.Col(kpi('CNPJs Suspeitos',      f'{fraude_stats["cnpjs_suspeitos"]:,}',
-                                f'de {fraude_stats["total_cnpjs_com_boleto"]:,} c/ boletos', WARN), width=3),
-                ], className='g-3', style={'marginBottom': '20px'}),
-
-                dbc.Row([
-                    dbc.Col([
-                        card([html.Div('Tipos de duplicata detectados', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
-                              G(ch.fig_duplicatas_tipo(fraude_stats))]),
-                    ], width=5),
-                    dbc.Col([
-                        card([html.Div('Concentração de emitentes por pagador', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
-                              G(ch.fig_emitentes_por_pagador(fraude_cnpj))]),
-                    ], width=7),
-                ], className='g-3'),
-
-                card([html.Div('Top CNPJs por % de boletos duplicados  (laranja = flag de risco ativado)', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
-                      G(ch.fig_top_cnpjs_suspeitos(fraude_cnpj))]),
-
-                card([html.Div('Score FIDC vs % duplicados — CNPJs suspeitos em destaque', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
-                      G(ch.fig_scatter_fraude(df_full))]),
-
-                card([html.Div('Grupos de boletos duplicados com maior incidência', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
-                      G(ch.fig_resumo_duplicatas(resumo_dup))]),
-
-                # Tabela de CNPJs suspeitos
-                card([
-                    html.Div('CNPJs com flag de risco de fraude', style={'fontSize': '14px', 'fontWeight': '600', 'marginBottom': '12px', 'color': WARN}),
-                    *([] if fraude_cnpj[fraude_cnpj['flag_risco_fraude'] == 1].empty else [
-                        dash_table.DataTable(
-                            data=fraude_cnpj[fraude_cnpj['flag_risco_fraude'] == 1]
-                                .sort_values('bol_pct_duplicado', ascending=False)
-                                [['id_pagador', 'bol_qtd_total', 'bol_qtd_dup_total',
-                                  'bol_pct_duplicado', 'bol_n_emitentes', 'motivo_alerta']]
-                                .rename(columns={
-                                    'id_pagador': 'CNPJ', 'bol_qtd_total': 'Total Bol.',
-                                    'bol_qtd_dup_total': 'Duplicatas', 'bol_pct_duplicado': '% Dup.',
-                                    'bol_n_emitentes': 'Emitentes', 'motivo_alerta': 'Motivo'})
-                                .assign(**{'% Dup.': lambda d: (d['% Dup.'] * 100).round(1).astype(str) + '%'})
-                                .to_dict('records'),
-                            columns=[{'name': c, 'id': c} for c in
-                                     ['CNPJ', 'Total Bol.', 'Duplicatas', '% Dup.', 'Emitentes', 'Motivo']],
-                            page_size=15, sort_action='native',
-                            style_table={'overflowX': 'auto'},
-                            style_cell={'backgroundColor': CARD_BG, 'color': WHITE,
-                                        'border': f'1px solid {BORDER}', 'fontFamily': 'Space Grotesk',
-                                        'fontSize': '12px', 'padding': '8px 12px', 'textAlign': 'left'},
-                            style_header={'backgroundColor': BLUE, 'fontWeight': '700',
-                                          'color': WARN, 'border': f'1px solid {BORDER}', 'fontSize': '12px'},
-                            style_data_conditional=[
-                                {'if': {'filter_query': '{Motivo} contains "Duplicatas" && {Motivo} contains "Emitentes"'},
-                                 'backgroundColor': '#2d0a0a', 'color': '#ff6b6b', 'fontWeight': '600'},
-                                {'if': {'row_index': 'odd'}, 'backgroundColor': '#0d1b2a'},
-                            ],
-                        )
-                    ]),
-                    html.Div('Nenhum CNPJ suspeito encontrado com os thresholds atuais.',
-                             style={'color': ACCENT2, 'fontSize': '13px', 'padding': '12px 0'})
-                    if fraude_cnpj[fraude_cnpj['flag_risco_fraude'] == 1].empty else html.Div(),
-                ]),
-              ])]),
-
 
             # ── CONTEXTO MACROECONÔMICO ───────────────────────────────────
             dcc.Tab(label='🌐 Macro', value='tab-macro', style=tab_style,
