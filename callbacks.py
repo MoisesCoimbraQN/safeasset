@@ -667,81 +667,92 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                 ]),
 
                 # ════════════════════════════════════════════════════════
-                # BLOCO 2 — Probabilidade ML
+                # BLOCO 2 — Score ML Auxiliar (contínuo)
                 # ════════════════════════════════════════════════════════
                 *([card([
-                    html.Div('2 — Probabilidade ML (Segunda Opinião)',
+                    html.Div('2 — Score ML Auxiliar (indicador contínuo de risco)',
                              style={'fontSize': '15px', 'fontWeight': '700',
                                     'color': '#a78bfa', 'marginBottom': '16px',
                                     'borderLeft': '4px solid #a78bfa',
                                     'paddingLeft': '10px'}),
-                    html.Div(f'Modelo: {best_name.split()[0]}  ·  Padrões aprendidos nos boletos — independente do score de negócio',
+                    html.Div(f'Modelo: {best_name.split()[0]}  ·  AUC {ml[best_name]["auc"]:.4f}  ·  '
+                             f'Quanto maior, menor o risco segundo o comportamento dos boletos',
                              style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '16px'}),
                     dbc.Row([
                         dbc.Col(kpi(
-                            'Recomendados pelo ML',
-                            f'{int((df_full["prob_ml_bom"] >= 50).sum()):,}',
-                            f'{(df_full["prob_ml_bom"] >= 50).mean()*100:.1f}% — prob ≥ 50%',
-                            ACCENT2), width=3),
-                        dbc.Col(kpi(
-                            'Não Recomendados pelo ML',
-                            f'{int((df_full["prob_ml_bom"] < 50).sum()):,}',
-                            f'{(df_full["prob_ml_bom"] < 50).mean()*100:.1f}% — prob < 50%',
-                            WARN), width=3),
-                        dbc.Col(kpi(
-                            'Prob. ML Média',
+                            'Score ML Médio',
                             f'{df_full["prob_ml_bom"].mean():.1f}%',
                             f'Mediana: {df_full["prob_ml_bom"].median():.1f}%',
-                            ACCENT), width=3),
+                            '#a78bfa'), width=3),
                         dbc.Col(kpi(
-                            'AUC do Modelo',
+                            'Score ML Alto (≥ 40%)',
+                            f'{int((df_full["prob_ml_bom"] >= 40).sum()):,}',
+                            f'{(df_full["prob_ml_bom"] >= 40).mean()*100:.1f}% — sinal positivo',
+                            ACCENT2), width=3),
+                        dbc.Col(kpi(
+                            'Score ML Baixo (< 20%)',
+                            f'{int((df_full["prob_ml_bom"] < 20).sum()):,}',
+                            f'{(df_full["prob_ml_bom"] < 20).mean()*100:.1f}% — sinal de atenção',
+                            WARN), width=3),
+                        dbc.Col(kpi(
+                            'AUC-ROC',
                             f'{ml[best_name]["auc"]:.4f}',
-                            f'Melhor modelo: {best_name.split()[0]}',
+                            f'{best_name.split()[0]} — poder preditivo',
                             '#a78bfa'), width=3),
                     ], className='g-3'),
+                    html.Div([
+                        html.Span('ℹ️  ', style={'fontSize': '14px'}),
+                        html.Span(
+                            'O Score ML é um indicador relativo — não classifica bom/ruim diretamente. '
+                            'Scores mais altos indicam padrões de pagamento mais saudáveis nos boletos. '
+                            'Use em conjunto com o Score FIDC para uma visão complementar.',
+                            style={'fontSize': '11px', 'color': MUTED}),
+                    ], style={'marginTop': '12px', 'padding': '8px 12px',
+                              'background': '#0a1e30', 'borderRadius': '6px',
+                              'border': f'1px solid {BORDER}'}),
                 ])] if 'prob_ml_bom' in df_full.columns else []),
 
                 # ════════════════════════════════════════════════════════
                 # BLOCO 3 — Divergência Score vs ML
                 # ════════════════════════════════════════════════════════
                 *([card([
-                    html.Div('3 — Divergência: Score Final × Modelo ML',
+                    html.Div('3 — Sinais de Divergência: Score FIDC × Score ML',
                              style={'fontSize': '15px', 'fontWeight': '700',
                                     'color': WARN, 'marginBottom': '16px',
                                     'borderLeft': f'4px solid {WARN}',
                                     'paddingLeft': '10px'}),
-                    html.Div('CNPJs onde os dois sistemas discordam — merecem análise individual antes da decisão de aquisição',
+                    html.Div('CNPJs onde os dois sistemas apontam direções opostas — '
+                             'requerem análise adicional do analista antes da aquisição',
                              style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '16px'}),
                     dbc.Row([
                         dbc.Col(kpi(
-                            'Total com Divergência',
+                            'Sinais de Atenção',
                             f'{int(df_full["alerta_divergencia"].sum()):,}',
                             f'{df_full["alerta_divergencia"].mean()*100:.1f}% da carteira',
                             WARN), width=3),
                         dbc.Col(kpi(
-                            'Score Alto + ML Pessimista',
-                            f'{int(((df_full["score_fidc"]>=700)&(df_full["prob_ml_bom"]<40)).sum()):,}',
-                            'Score ≥ 800  ·  ML < 30% — risco oculto',
+                            'Score Alto + ML Baixo',
+                            f'{int(((df_full["score_fidc"]>=800)&(df_full["prob_ml_bom"]<30)).sum()):,}',
+                            'Score ≥ 800 · ML < 30% — investigar',
                             WARN), width=3),
                         dbc.Col(kpi(
-                            'Score Baixo + ML Otimista',
-                            f'{int(((df_full["score_fidc"]<400)&(df_full["prob_ml_bom"]>=60)).sum()):,}',
-                            'Score < 300  ·  ML ≥ 70% — oportunidade',
+                            'Score Baixo + ML Alto',
+                            f'{int(((df_full["score_fidc"]<300)&(df_full["prob_ml_bom"]>=70)).sum()):,}',
+                            'Score < 300 · ML ≥ 70% — revisar',
                             ACCENT2), width=3),
                         dbc.Col(kpi(
                             'Sem Divergência',
                             f'{int((df_full["alerta_divergencia"]==0).sum()):,}',
-                            f'{(df_full["alerta_divergencia"]==0).mean()*100:.1f}% — consenso entre sistemas',
+                            f'{(df_full["alerta_divergencia"]==0).mean()*100:.1f}% — sinais alinhados',
                             ACCENT), width=3),
                     ], className='g-3'),
                     html.Div([
                         html.Span('ℹ️  ', style={'fontSize': '14px'}),
-                        html.Span('Acesse a aba ',
-                                  style={'fontSize': '12px', 'color': MUTED}),
-                        html.Span('🥇 Score Final',
-                                  style={'fontSize': '12px', 'color': ACCENT, 'fontWeight': '600'}),
-                        html.Span(' para visualizar o scatter de divergência com todos os CNPJs.',
-                                  style={'fontSize': '12px', 'color': MUTED}),
+                        html.Span(
+                            'Divergência esperada: Score FIDC e Score ML medem dimensões distintas. '
+                            'O Score FIDC usa regras de negócio (liquidez e materialidade). '
+                            'O Score ML usa padrões de boletos. A divergência é um sinal de investigação, não de erro.',
+                            style={'fontSize': '11px', 'color': MUTED}),
                     ], style={'marginTop': '12px', 'padding': '8px 12px',
                               'background': '#0a1e30', 'borderRadius': '6px',
                               'border': f'1px solid {BORDER}'}),
@@ -766,8 +777,8 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                             f"{int((df_full['rating_carteira'].isin(['A — Excelente','B — Bom'])).sum()):,} CNPJs "
                             f"possuem rating A ou B pelo score de negócio. "),
                         *([html.Span(
-                            f"{int(df_full['alerta_divergencia'].sum()):,} CNPJs apresentam divergência entre "
-                            "score e modelo ML e requerem análise individual."
+                            f"{int(df_full['alerta_divergencia'].sum()):,} CNPJs apresentam sinais divergentes entre "
+                            "score de negócio e score ML — recomenda-se análise individual antes da aquisição."
                         )] if 'alerta_divergencia' in df_full.columns else []),
                     ], style={'fontSize': '13px', 'color': WHITE, 'lineHeight': '1.8'}),
                 ]),
