@@ -579,193 +579,195 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
         children=[
 
             # ── EDA ───────────────────────────────────────────────────────
-            # ── RESUMO INDICATIVO ─────────────────────────────────────
+            # ── RESUMO INDICATIVO ─────────────────────────────────────────
             dcc.Tab(label='📋 Resumo', value='tab-resumo',
                     style=tab_style,
                     selected_style={'color': NAVY, 'background': ACCENT2, 'fontWeight': '700'},
               children=[html.Div(style={'padding': '24px'}, children=[
 
-                # ── Cabeçalho executivo ───────────────────────────────────
                 html.Div([
-                    html.Div('Resumo Indicativo de Carteira', style={
-                        'fontSize': '22px', 'fontWeight': '700', 'color': WHITE}),
-                    html.Div('Priorização para o analista de crédito — CNPJs recomendados, alertas e contexto macro',
+                    html.Div('Resumo Indicativo de Carteira',
+                             style={'fontSize': '22px', 'fontWeight': '700', 'color': WHITE}),
+                    html.Div('Priorização para o analista de crédito — visão consolidada dos 4 indicadores principais',
                              style={'fontSize': '13px', 'color': MUTED, 'marginTop': '4px'}),
-                ], style={'marginBottom': '20px'}),
+                ], style={'marginBottom': '24px'}),
 
-                # ── Veredicto ─────────────────────────────────────────────
-                *([
-                    # Pill de recomendação geral
-                    html.Div([
-                        html.Span(
-                            '✅ CARTEIRA RECOMENDÁVEL' if df_full['score_fidc'].mean() >= 600
-                            else ('⚠️ CARTEIRA COM RESSALVAS' if df_full['score_fidc'].mean() >= 400
-                                  else '🚨 CARTEIRA DE ALTO RISCO'),
-                            style={
-                                'background': ACCENT2 if df_full['score_fidc'].mean() >= 600
-                                              else (AMBER if df_full['score_fidc'].mean() >= 400 else WARN),
-                                'color': NAVY, 'fontWeight': '800', 'fontSize': '15px',
-                                'padding': '8px 24px', 'borderRadius': '24px',
-                            }
-                        ),
-                    ], style={'marginBottom': '20px'}),
+                # ── Veredicto geral ───────────────────────────────────────
+                html.Div([
+                    html.Span(
+                        '✅ CARTEIRA RECOMENDÁVEL' if df_full['score_fidc'].mean() >= 600
+                        else ('⚠️ CARTEIRA COM RESSALVAS' if df_full['score_fidc'].mean() >= 400
+                              else '🚨 CARTEIRA DE ALTO RISCO'),
+                        style={
+                            'background': ACCENT2 if df_full['score_fidc'].mean() >= 600
+                                          else (AMBER if df_full['score_fidc'].mean() >= 400 else WARN),
+                            'color': NAVY, 'fontWeight': '800', 'fontSize': '15px',
+                            'padding': '8px 24px', 'borderRadius': '24px',
+                        }
+                    ),
+                ], style={'marginBottom': '28px'}),
 
-                    # KPIs principais
+                # ════════════════════════════════════════════════════════
+                # BLOCO 0 — Recomendação pelo Target
+                # ════════════════════════════════════════════════════════
+                card([
+                    html.Div('0 — Recomendação segundo o Target',
+                             style={'fontSize': '15px', 'fontWeight': '700',
+                                    'color': ACCENT, 'marginBottom': '16px',
+                                    'borderLeft': f'4px solid {ACCENT}',
+                                    'paddingLeft': '10px'}),
+                    html.Div('Classificação binária por regras de negócio Núclea (liquidez + materialidade + atraso)',
+                             style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '16px'}),
                     dbc.Row([
-                        dbc.Col(kpi('Total de CNPJs',    f'{len(df_full):,}',          'na carteira analisada', ACCENT),  width=2),
-                        dbc.Col(kpi('Score Médio',        f'{df_full["score_fidc"].mean():.0f}', '/ 1000', ACCENT),         width=2),
-                        dbc.Col(kpi('Rating A + B',
-                            f'{int((df_full["rating_carteira"].isin(["A — Excelente","B — Bom"])).sum()):,}',
-                            f'{(df_full["rating_carteira"].isin(["A — Excelente","B — Bom"])).mean()*100:.1f}% da base',
-                            ACCENT2), width=2),
-                        dbc.Col(kpi('Alertas Fraude',     f'{int(df_full.get("flag_risco_fraude", pd.Series([0]*len(df_full))).sum()):,}', 'CNPJs suspeitos', WARN), width=2),
-                        dbc.Col(kpi('Divergência ML',
-                            f'{int(df_full["alerta_divergencia"].sum()):,}' if "alerta_divergencia" in df_full.columns else "—",
-                            'score ≠ modelo ML', WARN), width=2),
-                        dbc.Col(kpi('Contexto Macro',
-                            f'{list(macro.get("scores_setor",{}).values())[0]["nivel"] if macro.get("scores_setor") else "—"}',
-                            'setor predominante', ACCENT), width=2),
-                    ], className='g-3', style={'marginBottom': '24px'}),
-
-                    # ── Top 10 para aquisição ─────────────────────────────
-                    dbc.Row([
-                        dbc.Col([
-                            html.Div('🟢 Top 10 — Recomendados para Aquisição',
-                                     style={'fontSize': '15px', 'fontWeight': '600',
-                                            'color': ACCENT2, 'marginBottom': '12px'}),
-                            html.Div('Score alto + modelo ML favorável + sem alerta de fraude',
-                                     style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '10px'}),
-                            *([dash_table.DataTable(
-                                data=(df_full[
-                                    (df_full['rating_carteira'].isin(['A — Excelente', 'B — Bom'])) &
-                                    (df_full.get('flag_risco_fraude', pd.Series([0]*len(df_full))).values == 0) &
-                                    ((df_full['prob_ml_bom'] >= 55) if 'prob_ml_bom' in df_full.columns else pd.Series([True]*len(df_full)))
-                                ][[c for c in ['id_cnpj', 'uf', 'cd_cnae_prin', 'score_fidc', 'rating_carteira',
-                                    'prob_ml_bom', 'bol_pct_atrasado', 'bol_atraso_medio']
-                                   if c in df_full.columns]]
-                                .sort_values('score_fidc', ascending=False)
-                                .head(20)
-                                .rename(columns={'id_cnpj':'CNPJ','uf':'UF','cd_cnae_prin':'CNAE',
-                                                 'score_fidc':'Score','rating_carteira':'Rating',
-                                                 'prob_ml_bom':'Prob.ML%','bol_pct_atrasado':'%Atrasado',
-                                                 'bol_atraso_medio':'Atraso(dias)'})
-                                .to_dict('records')),
-                                columns=[{'name':c,'id':c} for c in
-                                         [c for c in ['CNPJ','UF','CNAE','Score','Rating',
-                                          'Prob.ML%','%Atrasado','Atraso(dias)']
-                                          if c in df_full.rename(columns={'id_cnpj':'CNPJ','uf':'UF',
-                                          'cd_cnae_prin':'CNAE','score_fidc':'Score',
-                                          'rating_carteira':'Rating','prob_ml_bom':'Prob.ML%',
-                                          'bol_pct_atrasado':'%Atrasado',
-                                          'bol_atraso_medio':'Atraso(dias)'}).columns]],
-                                style_table={'overflowX':'auto'},
-                                style_cell={'backgroundColor':CARD_BG,'color':WHITE,
-                                            'border':f'1px solid {BORDER}','fontFamily':'Space Grotesk',
-                                            'fontSize':'12px','padding':'7px 12px','textAlign':'left'},
-                                style_header={'backgroundColor':'#0a2a1a','fontWeight':'700',
-                                              'color':ACCENT2,'border':f'1px solid {BORDER}'},
-                                style_data_conditional=[
-                                    {'if':{'row_index':'odd'},'backgroundColor':'#0a1f14'},
-                                ],
-                            )]),
-                        ], width=6),
-
-                        dbc.Col([
-                            html.Div('🔴 CNPJs de Alerta — Investigar antes de adquirir',
-                                     style={'fontSize': '15px', 'fontWeight': '600',
-                                            'color': WARN, 'marginBottom': '12px'}),
-                            html.Div('Fraude detectada OU divergência ML OU rating D/E',
-                                     style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '10px'}),
-                            *([dash_table.DataTable(
-                                data=(df_full[
-                                    (df_full['rating_carteira'].isin(['D — Risco Elevado','E — Alto Risco'])) |
-                                    (df_full.get('flag_risco_fraude', pd.Series([0]*len(df_full))).values == 1) |
-                                    ((df_full['alerta_divergencia'] == 1) if 'alerta_divergencia' in df_full.columns else pd.Series([False]*len(df_full)))
-                                ][['id_cnpj', 'uf', 'score_fidc', 'rating_carteira'] +
-                                  (['alerta_divergencia','flag_risco_fraude'] if 'alerta_divergencia' in df_full.columns else [])]
-                                .sort_values('score_fidc', ascending=True)
-                                .head(20)
-                                .rename(columns={'id_cnpj':'CNPJ','uf':'UF','score_fidc':'Score',
-                                                 'rating_carteira':'Rating',
-                                                 'alerta_divergencia':'Diverg.ML',
-                                                 'flag_risco_fraude':'Fraude'})
-                                .to_dict('records')),
-                                columns=[{'name':c,'id':c} for c in
-                                         ['CNPJ','UF','Score','Rating'] +
-                                         (['Diverg.ML','Fraude'] if 'alerta_divergencia' in df_full.columns else [])],
-                                style_table={'overflowX':'auto'},
-                                style_cell={'backgroundColor':CARD_BG,'color':WHITE,
-                                            'border':f'1px solid {BORDER}','fontFamily':'Space Grotesk',
-                                            'fontSize':'12px','padding':'7px 12px','textAlign':'left'},
-                                style_header={'backgroundColor':'#2a0a0a','fontWeight':'700',
-                                              'color':WARN,'border':f'1px solid {BORDER}'},
-                                style_data_conditional=[
-                                    {'if':{'filter_query':'{Fraude} = 1'},'color':WARN,'fontWeight':'600'},
-                                    {'if':{'filter_query':'{Diverg.ML} = 1'},'color':AMBER,'fontWeight':'600'},
-                                    {'if':{'row_index':'odd'},'backgroundColor':'#1a0a0a'},
-                                ],
-                            )]),
-                        ], width=6),
-                    ], className='g-3', style={'marginBottom': '20px'}),
-
-                    # ── Semáforo setorial macro ───────────────────────────
-                    *([ html.Div('🌐 Contexto Macroeconômico por Setor',
-                                 style={'fontSize': '15px', 'fontWeight': '600',
-                                        'color': WHITE, 'marginBottom': '12px'}),
-                        dbc.Row([
-                            dbc.Col(
-                                html.Div([
-                                    html.Span(
-                                        '🟢' if v['nivel'] == 'Favorável'
-                                        else ('🟡' if v['nivel'] == 'Neutro'
-                                              else ('🟠' if v['nivel'] == 'Atenção' else '🔴')),
-                                        style={'fontSize': '18px', 'marginRight': '8px'}),
-                                    html.Span(k.replace('_',' ').title(),
-                                              style={'fontSize': '13px', 'fontWeight': '600', 'color': WHITE}),
-                                    html.Span(f'  {v["score"]:.0f}/100  —  {v["nivel"]}',
-                                              style={'fontSize': '11px', 'color': MUTED, 'marginLeft': '6px'}),
-                                ], style={'background': CARD_BG, 'border': f'1px solid {BORDER}',
-                                          'borderLeft': f'4px solid {v["cor"]}',
-                                          'borderRadius': '8px', 'padding': '10px 14px',
-                                          'marginBottom': '8px'}),
-                                width=6
-                            )
-                            for k, v in list(macro.get('scores_setor', {}).items())[:8]
-                        ], className='g-2'),
-                    ] if macro.get('scores_setor') else [
-                        html.Div('🌐 Contexto macro disponível após carregar os arquivos.',
-                                 style={'color': MUTED, 'fontSize': '13px', 'padding': '12px 0'}),
-                    ]),
-
-                    # ── Recomendação textual automática ───────────────────
-                    html.Div(style={
-                        'background': '#0a1e30', 'border': f'1px solid {BORDER}',
-                        'borderLeft': f'4px solid {ACCENT2}',
-                        'borderRadius': '10px', 'padding': '16px 20px', 'marginTop': '20px',
-                    }, children=[
-                        html.Div('📌 Recomendação Automática',
-                                 style={'fontSize': '13px', 'fontWeight': '700',
-                                        'color': ACCENT2, 'marginBottom': '8px'}),
-                        html.Div([
-                            html.Span(f"A carteira analisada contém {len(df_full):,} CNPJs com score médio de "
-                                      f"{df_full['score_fidc'].mean():.0f}/1000. "),
-                            html.Span(
-                                f"{int((df_full['rating_carteira'].isin(['A — Excelente','B — Bom'])).sum()):,} CNPJs "
-                                f"({(df_full['rating_carteira'].isin(['A — Excelente','B — Bom'])).mean()*100:.1f}%) "
-                                "apresentam perfil favorável para aquisição (rating A ou B). "),
-                            html.Span(
-                                f"{int(df_full.get('flag_risco_fraude', pd.Series([0]*len(df_full))).sum()):,} CNPJs "
-                                "possuem alertas de fraude e devem ser excluídos ou investigados antes da aquisição. "
-                                if df_full.get('flag_risco_fraude', pd.Series([0]*len(df_full))).sum() > 0 else ""),
-                            html.Span(
-                                f"{int(df_full['alerta_divergencia'].sum()):,} CNPJs apresentam divergência entre "
-                                "o score de negócio e o modelo ML — recomenda-se análise individual antes de adquirir."
-                                if 'alerta_divergencia' in df_full.columns and df_full['alerta_divergencia'].sum() > 0
-                                else ""),
-                        ], style={'fontSize': '13px', 'color': WHITE, 'lineHeight': '1.7'}),
-                    ]),
-
+                        dbc.Col(kpi(
+                            'Carteiras Boas',
+                            f'{int(df_full["target"].sum()):,}',
+                            f'{df_full["target"].mean()*100:.1f}% da base — target = 1',
+                            ACCENT2), width=4),
+                        dbc.Col(kpi(
+                            'Carteiras Ruins',
+                            f'{int((df_full["target"]==0).sum()):,}',
+                            f'{(df_full["target"]==0).mean()*100:.1f}% da base — target = 0',
+                            WARN), width=4),
+                        dbc.Col(kpi(
+                            'Total Analisado',
+                            f'{len(df_full):,}',
+                            'CNPJs na carteira', ACCENT), width=4),
+                    ], className='g-3'),
                 ]),
+
+                # ════════════════════════════════════════════════════════
+                # BLOCO 1 — Score Final de Qualidade
+                # ════════════════════════════════════════════════════════
+                card([
+                    html.Div('1 — Score Final de Qualidade (0–1000)',
+                             style={'fontSize': '15px', 'fontWeight': '700',
+                                    'color': ACCENT2, 'marginBottom': '16px',
+                                    'borderLeft': f'4px solid {ACCENT2}',
+                                    'paddingLeft': '10px'}),
+                    html.Div('Fórmula ponderada: Liquidez (35%) + Materialidade (25%) + Quantidade (15%) + Liq.3m (10%) + Atraso (8%) + Inadimplência (7%)',
+                             style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '16px'}),
+                    dbc.Row([
+                        dbc.Col(kpi('Score Médio',
+                            f'{df_full["score_fidc"].mean():.0f}',
+                            f'Mín: {df_full["score_fidc"].min():.0f}  ·  Máx: {df_full["score_fidc"].max():.0f}',
+                            ACCENT), width=3),
+                        *[dbc.Col(kpi(
+                            rating.split('—')[0].strip(),
+                            f'{int((df_full["rating_carteira"]==rating).sum()):,}',
+                            f'{(df_full["rating_carteira"]==rating).mean()*100:.1f}%',
+                            RATING_COLOR.get(rating, WHITE)), width=1)
+                          for rating in ['A — Excelente','B — Bom','C — Risco Moderado','D — Risco Elevado','E — Alto Risco']
+                          if rating in df_full['rating_carteira'].values],
+                    ], className='g-2'),
+                ]),
+
+                # ════════════════════════════════════════════════════════
+                # BLOCO 2 — Probabilidade ML
+                # ════════════════════════════════════════════════════════
+                *([card([
+                    html.Div('2 — Probabilidade ML (Segunda Opinião)',
+                             style={'fontSize': '15px', 'fontWeight': '700',
+                                    'color': '#a78bfa', 'marginBottom': '16px',
+                                    'borderLeft': '4px solid #a78bfa',
+                                    'paddingLeft': '10px'}),
+                    html.Div(f'Modelo: {best_name.split()[0]}  ·  Padrões aprendidos nos boletos — independente do score de negócio',
+                             style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '16px'}),
+                    dbc.Row([
+                        dbc.Col(kpi(
+                            'Recomendados pelo ML',
+                            f'{int((df_full["prob_ml_bom"] >= 50).sum()):,}',
+                            f'{(df_full["prob_ml_bom"] >= 50).mean()*100:.1f}% — prob ≥ 50%',
+                            ACCENT2), width=3),
+                        dbc.Col(kpi(
+                            'Não Recomendados pelo ML',
+                            f'{int((df_full["prob_ml_bom"] < 50).sum()):,}',
+                            f'{(df_full["prob_ml_bom"] < 50).mean()*100:.1f}% — prob < 50%',
+                            WARN), width=3),
+                        dbc.Col(kpi(
+                            'Prob. ML Média',
+                            f'{df_full["prob_ml_bom"].mean():.1f}%',
+                            f'Mediana: {df_full["prob_ml_bom"].median():.1f}%',
+                            ACCENT), width=3),
+                        dbc.Col(kpi(
+                            'AUC do Modelo',
+                            f'{ml[best_name]["auc"]:.4f}',
+                            f'Melhor modelo: {best_name.split()[0]}',
+                            '#a78bfa'), width=3),
+                    ], className='g-3'),
+                ])] if 'prob_ml_bom' in df_full.columns else []),
+
+                # ════════════════════════════════════════════════════════
+                # BLOCO 3 — Divergência Score vs ML
+                # ════════════════════════════════════════════════════════
+                *([card([
+                    html.Div('3 — Divergência: Score Final × Modelo ML',
+                             style={'fontSize': '15px', 'fontWeight': '700',
+                                    'color': WARN, 'marginBottom': '16px',
+                                    'borderLeft': f'4px solid {WARN}',
+                                    'paddingLeft': '10px'}),
+                    html.Div('CNPJs onde os dois sistemas discordam — merecem análise individual antes da decisão de aquisição',
+                             style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '16px'}),
+                    dbc.Row([
+                        dbc.Col(kpi(
+                            'Total com Divergência',
+                            f'{int(df_full["alerta_divergencia"].sum()):,}',
+                            f'{df_full["alerta_divergencia"].mean()*100:.1f}% da carteira',
+                            WARN), width=3),
+                        dbc.Col(kpi(
+                            'Score Alto + ML Pessimista',
+                            f'{int(((df_full["score_fidc"]>=700)&(df_full["prob_ml_bom"]<40)).sum()):,}',
+                            'Score ≥ 700  ·  ML < 40% — risco oculto',
+                            WARN), width=3),
+                        dbc.Col(kpi(
+                            'Score Baixo + ML Otimista',
+                            f'{int(((df_full["score_fidc"]<400)&(df_full["prob_ml_bom"]>=60)).sum()):,}',
+                            'Score < 400  ·  ML ≥ 60% — oportunidade',
+                            ACCENT2), width=3),
+                        dbc.Col(kpi(
+                            'Sem Divergência',
+                            f'{int((df_full["alerta_divergencia"]==0).sum()):,}',
+                            f'{(df_full["alerta_divergencia"]==0).mean()*100:.1f}% — consenso entre sistemas',
+                            ACCENT), width=3),
+                    ], className='g-3'),
+                    html.Div([
+                        html.Span('ℹ️  ', style={'fontSize': '14px'}),
+                        html.Span('Acesse a aba ',
+                                  style={'fontSize': '12px', 'color': MUTED}),
+                        html.Span('🥇 Score Final',
+                                  style={'fontSize': '12px', 'color': ACCENT, 'fontWeight': '600'}),
+                        html.Span(' para visualizar o scatter de divergência com todos os CNPJs.',
+                                  style={'fontSize': '12px', 'color': MUTED}),
+                    ], style={'marginTop': '12px', 'padding': '8px 12px',
+                              'background': '#0a1e30', 'borderRadius': '6px',
+                              'border': f'1px solid {BORDER}'}),
+                ])] if 'alerta_divergencia' in df_full.columns else []),
+
+                # ── Recomendação textual ──────────────────────────────────
+                html.Div(style={
+                    'background': '#0a1e30', 'border': f'1px solid {BORDER}',
+                    'borderLeft': f'4px solid {ACCENT2}',
+                    'borderRadius': '10px', 'padding': '16px 20px', 'marginTop': '8px',
+                }, children=[
+                    html.Div('📌 Recomendação Automática',
+                             style={'fontSize': '13px', 'fontWeight': '700',
+                                    'color': ACCENT2, 'marginBottom': '8px'}),
+                    html.Div([
+                        html.Span(f"A carteira contém {len(df_full):,} CNPJs com score médio de "
+                                  f"{df_full['score_fidc'].mean():.0f}/1000. "),
+                        html.Span(
+                            f"{int(df_full['target'].sum()):,} CNPJs "
+                            f"({df_full['target'].mean()*100:.1f}%) são classificados como boas carteiras pelo target. "),
+                        html.Span(
+                            f"{int((df_full['rating_carteira'].isin(['A — Excelente','B — Bom'])).sum()):,} CNPJs "
+                            f"possuem rating A ou B pelo score de negócio. "),
+                        *([html.Span(
+                            f"{int(df_full['alerta_divergencia'].sum()):,} CNPJs apresentam divergência entre "
+                            "score e modelo ML e requerem análise individual."
+                        )] if 'alerta_divergencia' in df_full.columns else []),
+                    ], style={'fontSize': '13px', 'color': WHITE, 'lineHeight': '1.8'}),
+                ]),
+
               ])]),
 
             dcc.Tab(label='📊 EDA', value='tab-eda', style=tab_style, selected_style=tab_sel,
