@@ -299,8 +299,8 @@ def register_callbacks(app):
                 df_aux.copy(), df_bol.copy(),
                 test_size          = test_size  or 0.2,
                 n_estimators       = n_trees    or 300,
-                liq_thresh         = liq_thresh or 0.70,
-                mat_thresh         = mat_thresh or 750,
+                liq_thresh         = liq_thresh or 0.65,
+                mat_thresh         = mat_thresh or 800,
                 pct_dup_thresh     = (dup_thresh  or 5)  / 100,
                 n_emitentes_thresh = emit_thresh or 10,
             )
@@ -315,7 +315,7 @@ def register_callbacks(app):
             ], style={'padding': '24px'}), ''
 
         # ── Montar dashboard ──────────────────────────────────────────────
-        dashboard = build_dashboard(R, liq_thresh or 0.70, mat_thresh or 750)
+        dashboard = build_dashboard(R, liq_thresh or 0.65, mat_thresh or 800)
         return dashboard, ''
 
     # ── Filtros do ranking ─────────────────────────────────────────────────
@@ -342,7 +342,7 @@ def register_callbacks(app):
         df_bol = read_json(bol_json)
         R = pl.run_pipeline(df_aux.copy(), df_bol.copy(),
                              test_size=test_size or 0.2, n_estimators=n_trees or 300,
-                             liq_thresh=liq_thresh or 0.70, mat_thresh=mat_thresh or 750)
+                             liq_thresh=liq_thresh or 0.65, mat_thresh=mat_thresh or 800)
         return build_rank_table(R['df_full'], cnpj_q, sel_ufs, sel_cnaes, sel_ratings, score_range)
 
     # ── CALLBACK MACRO — dispara quando aba é aberta ou store muda ──────
@@ -893,7 +893,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
             dcc.Tab(label='🎯 Target & Correlação', style=tab_style, selected_style=tab_sel,
               children=[html.Div(style={'padding': '24px'}, children=[
                 section_title('5–6. Target e Correlação',
-                    f'Regra: score ≥ {int(mat_thresh)} & liquidez ≥ {liq_thresh} & atraso ≤ P75 ({R["p75_atraso"]:.0f} dias)'),
+                    f'Regra 2 de 3: score_quantidade ≥ {int(mat_thresh)} · score_materialidade ≥ {int(mat_thresh)} · liquidez_3m ≥ {liq_thresh}'),
                 card([html.Div('Distribuição do Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_target_pizza(df_full))]),
                 card([html.Div('Score Materialidade v2 por Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_boxplot_target(df_full, 'score_materialidade_v2', 'Score Materialidade v2'))]),
                 card([html.Div('Liquidez Sacado (1m) por Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_boxplot_target(df_full, 'sacado_indice_liquidez_1m', 'Índice de Liquidez (1m)'))]),

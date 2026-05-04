@@ -33,17 +33,27 @@ except ImportError:
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Features do modelo — NÃO incluir as que definem o target (data leakage):
-# Removidas: 'sacado_indice_liquidez_1m', 'score_materialidade_v2', 'media_atraso_dias'
-# Essas três são exatamente as condições usadas em definir_target() para criar o target.
+# Removidas do modelo para evitar data leakage:
+# 'sacado_indice_liquidez_1m' — usada anteriormente no target (versão antiga)
+# 'score_materialidade_v2'    — usada no target como Critério 2
+# 'media_atraso_dias'         — usada anteriormente no target (versão antiga)
+# Nota: score_quantidade_v2 e indicador_liquidez_quantitativo_3m também definem
+# o target e portanto NÃO devem entrar como features do modelo.
 # Incluí-las faria o modelo aprender a regra em vez de padrões reais de crédito.
 FEATURES = [
-    'cedente_indice_liquidez_1m',
-    'score_materialidade_evolucao',
-    'indicador_liquidez_quantitativo_3m',
-    'share_vl_inad_pag_bol_6_a_15d',
-    'score_quantidade_v2',
-    'bol_qtd_total', 'bol_pct_atrasado', 'bol_pct_sem_pgto',
-    'bol_taxa_recuperacao', 'bol_atraso_medio', 'bol_pct_protestado',
+    # Features de comportamento de pagamento — sem leakage com o target
+    # Removidas: score_quantidade_v2, score_materialidade_v2,
+    #            indicador_liquidez_quantitativo_3m, sacado_indice_liquidez_1m,
+    #            media_atraso_dias (todas usadas para definir o target)
+    'cedente_indice_liquidez_1m',      # liquidez como cedente (1m)
+    'score_materialidade_evolucao',     # score evolução — não entra no target
+    'share_vl_inad_pag_bol_6_a_15d',   # % boletos com atraso 6-15 dias
+    'bol_qtd_total',                    # volume total de boletos
+    'bol_pct_atrasado',                 # % boletos atrasados
+    'bol_pct_sem_pgto',                 # % boletos sem pagamento
+    'bol_taxa_recuperacao',             # taxa de recuperação
+    'bol_atraso_medio',                 # atraso médio dos boletos
+    'bol_pct_protestado',               # % protestados
 ]
 
 RATING_COLOR = {
@@ -327,20 +337,42 @@ def agregar_boletos(df_bol: pd.DataFrame) -> pd.DataFrame:
 # PASSO 5 — TARGET
 # ─────────────────────────────────────────────────────────────────────────────
 
-def definir_target(df_full: pd.DataFrame, liq_thresh: float, mat_thresh: float):
+def definir_target(df_full: pd.DataFrame,
+                    liq_thresh: float = 0.65,
+                    mat_thresh: float = 800):
     """
-    Target=1 (carteira BOA) quando satisfaz as 3 condições:
-      score_materialidade_v2 >= mat_thresh
-      sacado_indice_liquidez_1m >= liq_thresh
-      media_atraso_dias <= P75 da base
+    Target=1 (carteira BOA) quando pelo menos DOIS dos três critérios são atendidos:
+
+      Critério 1 — Score quantidade:    score_quantidade_v2          >= mat_thresh
+      Critério 2 — Score materialidade: score_materialidade_v2       >= mat_thresh
+      Critério 3 — Liquidez 3m cedente: indicador_liquidez_quantitativo_3m >= liq_thresh
+
+    Regra "2 de 3": um CNPJ não é penalizado por falhar em um único critério,
+    o que evita a exclusão por sazonalidade ou ausência de boletos em um período.
+    Remove media_atraso_dias do target — o dicionário de dados indica que
+    clientes bons podem ter valores altos nessa coluna.
+
+    Parâmetros
+    ----------
+    liq_thresh : threshold de liquidez 3m (padrão 0.65)
+    mat_thresh : threshold dos scores de quantidade e materialidade (padrão 800)
     """
-    p75 = df_full['media_atraso_dias'].quantile(0.75)
-    df  = df_full.copy()
-    df['target'] = (
-        (df['score_materialidade_v2']    >= mat_thresh) &
-        (df['sacado_indice_liquidez_1m'] >= liq_thresh) &
-        (df['media_atraso_dias']         <= p75)
-    ).astype(int)
+    df = df_full.copy()
+
+    c1 = (df['score_quantidade_v2'].fillna(0)                >= mat_thresh).astype(int)
+    c2 = (df['score_materialidade_v2'].fillna(0)             >= mat_thresh).astype(int)
+    c3 = (df['indicador_liquidez_quantitativo_3m'].fillna(0) >= liq_thresh).astype(int)
+
+    # target=1 quando pelo menos 2 critérios são satisfeitos
+    df['target'] = ((c1 + c2 + c3) >= 2).astype(int)
+
+    # Manter p75 de atraso para compatibilidade com o resto do código
+    p75 = df['media_atraso_dias'].quantile(0.75) if 'media_atraso_dias' in df.columns else 0
+
+    pct = df['target'].mean() * 100
+    print(f"[SafeAsset] Target — Bons: {df['target'].sum():,} ({pct:.1f}%)  "
+          f"Ruins: {(df['target']==0).sum():,} ({100-pct:.1f}%)")
+
     return df, p75
 
 
@@ -583,7 +615,7 @@ def calcular_score_final(df_full: pd.DataFrame) -> pd.DataFrame:
 
 def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
                  test_size: float = 0.2, n_estimators: int = 300,
-                 liq_thresh: float = 0.70, mat_thresh: float = 750,
+                 liq_thresh: float = 0.65, mat_thresh: float = 800,
                  pct_dup_thresh: float = FRAUDE_PCT_DUP_THRESH,
                  n_emitentes_thresh: int = FRAUDE_N_EMITENTES_THRESH) -> dict:
     """
