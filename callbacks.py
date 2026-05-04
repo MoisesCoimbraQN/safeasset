@@ -216,6 +216,9 @@ def register_callbacks(app):
         Output('loading-output', 'children'),
         Input('btn-run',         'n_clicks'),
         Input('btn-run-upload',  'n_clicks'),
+        Input('btn-run-ml',      'n_clicks'),
+        Input('btn-run-target',  'n_clicks'),
+        Input('btn-run-fraud',   'n_clicks'),
         Input('store-raw-aux',   'data'),
         Input('store-raw-bol',   'data'),   # dispara quando bol é carregado
         Input('flt-cnpj',        'value'),
@@ -231,7 +234,8 @@ def register_callbacks(app):
         State('sl-emit-thresh', 'value'),
         prevent_initial_call=True,
     )
-    def run_dashboard(run_clicks, run_upload_clicks, aux_json_input, bol_json,
+    def run_dashboard(run_clicks, run_upload_clicks, ml_clicks, target_clicks, fraud_clicks,
+                      aux_json_input, bol_json,
                       cnpj_q, sel_ufs, sel_cnaes, date_from, date_to,
                       test_size, n_trees, liq_thresh, mat_thresh,
                       dup_thresh, emit_thresh):

@@ -140,6 +140,7 @@ def build_sidebar():
                            html.Div('base_boletos_fiap.csv', style={'fontSize': '10px', 'color': MUTED}),
                        ], style={'textAlign': 'center', 'padding': '12px'})),
             html.Div(id='bol-status', style={'fontSize': '11px', 'color': ACCENT2, 'marginBottom': '10px'}),
+            html.Div(id='btn-run', n_clicks=0, style={'display':'none'}),
             html.Button('▶ Executar com meus arquivos', id='btn-run-upload', n_clicks=0,
                         style={'width': '100%', 'background': BLUE, 'color': ACCENT,
                                'border': f'1px solid {ACCENT}', 'borderRadius': '8px',
@@ -170,12 +171,18 @@ def build_sidebar():
             dcc.Slider(id='sl-trees', min=100, max=500, step=100, value=300,
                        marks={100:{'label':'100','style':{'color':'#8892a4','fontSize':'10px'}},300:{'label':'300','style':{'color':'#00d4ff','fontSize':'10px'}},500:{'label':'500','style':{'color':'#8892a4','fontSize':'10px'}}},
                        tooltip={'always_visible': False}),
+            html.Button('🔄 Aplicar Parâmetros ML', id='btn-run-ml', n_clicks=0,
+                        style={'width':'100%','background':'#1e3a5f','color':'#00d4ff',
+                               'border':'1px solid #00d4ff','borderRadius':'6px',
+                               'padding':'7px','fontWeight':'700','cursor':'pointer',
+                               'fontFamily':"'Space Grotesk',sans-serif",
+                               'fontSize':'11px','marginTop':'10px'}),
 
         ]),
         ]),
 
         # Parâmetros do Target — recolhível
-        html.Details(open=True, style={'marginBottom': '12px'}, children=[
+        html.Details(open=False, style={'marginBottom': '12px'}, children=[
             html.Summary('🎯  Parâmetros do Target', style={
                 'fontWeight': '600', 'fontSize': '13px', 'color': ACCENT2,
                 'cursor': 'pointer', 'padding': '10px 14px',
@@ -203,6 +210,12 @@ def build_sidebar():
                                   900:{'label':'900','style':{'color':'#8892a4','fontSize':'10px'}},
                                   970:{'label':'970','style':{'color':'#8892a4','fontSize':'10px'}}},
                            tooltip={'always_visible': False}),
+                html.Button('🔄 Aplicar Parâmetros do Target', id='btn-run-target', n_clicks=0,
+                            style={'width':'100%','background':'#1e3a5f','color':'#00ff88',
+                                   'border':'1px solid #00ff88','borderRadius':'6px',
+                                   'padding':'7px','fontWeight':'700','cursor':'pointer',
+                                   'fontFamily':"'Space Grotesk',sans-serif",
+                                   'fontSize':'11px','marginTop':'10px'}),
             ]),
         ]),
 
@@ -230,7 +243,7 @@ def build_sidebar():
             dcc.Slider(id='sl-emit-thresh', min=2, max=30, step=1, value=10,
                        marks={2:{'label':'2','style':{'color':'#8892a4','fontSize':'10px'}},15:{'label':'15','style':{'color':'#8892a4','fontSize':'10px'}},30:{'label':'30','style':{'color':'#8892a4','fontSize':'10px'}}},
                        tooltip={'always_visible': False}),
-            html.Button('🔄 Reaplicar ML + Fraude', id='btn-run', n_clicks=0,
+            html.Button('🔄 Aplicar Detecção de Fraude', id='btn-run-fraud', n_clicks=0,
                         style={'width': '100%', 'background': BLUE, 'color': ACCENT,
                                'border': f'1px solid {ACCENT}', 'borderRadius': '8px',
                                'padding': '8px', 'fontWeight': '700', 'cursor': 'pointer',
@@ -239,11 +252,20 @@ def build_sidebar():
         ]),
         ]),
 
-        # Filtros globais
-        card([
-            html.Div('🔎 Filtros Globais', style={'fontWeight': '600', 'marginBottom': '4px', 'fontSize': '14px'}),
+        # Filtros globais — recolhível
+        html.Details(open=False, style={'marginBottom': '12px'}, children=[
+            html.Summary('🔎  Filtros Globais', style={
+                'fontWeight': '600', 'fontSize': '13px', 'color': '#a78bfa',
+                'cursor': 'pointer', 'padding': '10px 14px',
+                'background': '#1e3a5f', 'borderRadius': '8px',
+                'border': '1px solid #1e3a5f', 'listStyle': 'none',
+                'userSelect': 'none',
+            }),
+            html.Div(style={'background': '#111d2e', 'border': '1px solid #1e3a5f',
+                            'borderTop': 'none', 'borderRadius': '0 0 8px 8px',
+                            'padding': '14px'}, children=[
             html.Div('Aplicados automaticamente ao mudar',
-                     style={'fontSize': '10px', 'color': ACCENT2, 'marginBottom': '12px', 'fontStyle': 'italic'}),
+                     style={'fontSize': '10px', 'color': '#00ff88', 'marginBottom': '12px', 'fontStyle': 'italic'}),
             label_sm('Buscar CNPJ'),
             dcc.Input(id='flt-cnpj', placeholder='ex: CNPJ-001', debounce=True,
                       style={'width': '100%', 'background': '#0d1b2a', 'border': f'1px solid {BORDER}',
@@ -266,6 +288,7 @@ def build_sidebar():
                                'borderRadius': '6px', 'padding': '7px', 'cursor': 'pointer',
                                'fontFamily': "'Space Grotesk',sans-serif",
                                'fontSize': '12px', 'marginTop': '10px'}),
+            ]),
         ]),
     ])
 
