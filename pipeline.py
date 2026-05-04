@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
@@ -380,9 +381,17 @@ def treinar_modelos(df_full: pd.DataFrame, avail: list,
         X, y, test_size=test_size, random_state=42, stratify=y
     )
 
+    # Calcular peso para balancear classes desbalanceadas
+    n_neg = int((y_train == 0).sum())
+    n_pos = int((y_train == 1).sum())
+    scale_pos = max(1.0, n_neg / n_pos) if n_pos > 0 else 1.0
+    print(f"[SafeAsset] Treino — target=1: {n_pos} ({n_pos/(n_pos+n_neg)*100:.1f}%)  "
+          f"target=0: {n_neg}  scale_pos_weight: {scale_pos:.1f}")
+
     boost = (
         XGBClassifier(n_estimators=200, max_depth=4, learning_rate=0.05,
                       use_label_encoder=False, eval_metric='logloss',
+                      scale_pos_weight=scale_pos,
                       random_state=42, n_jobs=-1)
         if XGBOOST_AVAILABLE else
         GradientBoostingClassifier(n_estimators=200, max_depth=4,
@@ -425,6 +434,20 @@ def treinar_modelos(df_full: pd.DataFrame, avail: list,
             cm        = confusion_matrix(y_test, y_pred).tolist(),
             cv_scores = cv_scores.tolist(),
         )
+
+    # Calibrar probabilidades do melhor modelo (Platt scaling)
+    # Resolve o problema de probabilidades extremas (0% ou 100%) em modelos desbalanceados
+    best = max(resultados, key=lambda n: resultados[n]['auc'])
+    try:
+        calibrated = CalibratedClassifierCV(
+            resultados[best]['pipe'], cv='prefit', method='sigmoid'
+        )
+        calibrated.fit(X_test, y_test)
+        resultados[best]['pipe_calibrated'] = calibrated
+        print(f"[SafeAsset] Calibração OK — {best}")
+    except Exception as e:
+        print(f"[SafeAsset] Calibração falhou ({e}) — usando pipe original")
+        resultados[best]['pipe_calibrated'] = resultados[best]['pipe']
 
     return resultados, X_test, y_test
 
@@ -481,8 +504,8 @@ def calcular_prob_ml(df_full: pd.DataFrame,
     """
     df = df_full.copy()
 
-    # Obter pipeline treinado do melhor modelo
-    pipe = ml_results[best_name]['pipe']
+    # Usar pipeline calibrado se disponível (resolve probabilidades extremas)
+    pipe = ml_results[best_name].get('pipe_calibrated', ml_results[best_name]['pipe'])
 
     # Preparar features — apenas linhas sem NaN nas features disponíveis
     X_todos = df[avail].copy()
