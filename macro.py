@@ -395,6 +395,182 @@ def enriquecer_perfil_com_macro(perfil_cnae: pd.DataFrame,
 # FUNÇÃO PRINCIPAL — chamada pelo run_pipeline()
 # ─────────────────────────────────────────────────────────────────────────────
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INDICADOR DE RISCO SETORIAL — z-score histórico 24 meses
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Séries BCB por setor macro
+SERIES_SETOR = {
+    'agro':       21093,
+    'industria':  21087,
+    'comercio':   21088,
+    'servicos':   21089,
+    'construcao': 21082,  # proxy — sem série específica
+    'transporte': 21082,
+    'alojamento': 21082,
+    'info_ti':    21082,
+    'financeiro': 21082,
+    'saude':      21082,
+    'educacao':   21082,
+}
+
+# Fallback histórico por setor (usado se API indisponível)
+FALLBACK_HISTORICO = {
+    'agro':      [1.6,1.7,1.8,1.7,1.6,1.8,1.9,2.0,1.9,1.8,1.7,1.9,
+                  2.0,1.9,1.8,1.7,1.8,1.9,1.8,1.7,1.9,1.8,1.9,1.9],
+    'industria': [2.5,2.6,2.7,2.8,2.7,2.6,2.8,2.9,2.8,2.7,2.6,2.8,
+                  2.9,2.8,2.7,2.6,2.7,2.8,2.7,2.8,2.8,2.7,2.8,2.8],
+    'comercio':  [3.5,3.6,3.7,3.8,3.7,3.6,3.8,3.9,3.8,3.7,3.6,3.8,
+                  3.9,3.8,3.7,3.6,3.7,3.8,3.7,3.8,3.8,3.7,3.9,3.9],
+    'servicos':  [3.8,3.9,4.0,4.1,4.0,3.9,4.1,4.2,4.1,4.0,3.9,4.1,
+                  4.2,4.1,4.0,3.9,4.0,4.1,4.0,4.1,4.1,4.0,4.1,4.1],
+    'default':   [3.2,3.3,3.4,3.5,3.4,3.3,3.5,3.6,3.5,3.4,3.3,3.5,
+                  3.6,3.5,3.4,3.3,3.4,3.5,3.4,3.5,3.5,3.4,3.6,3.6],
+}
+
+
+def identificar_setor_predominante(df_aux: pd.DataFrame,
+                                    df_bol: pd.DataFrame) -> tuple:
+    """
+    Identifica o setor BCB predominante da carteira pelo valor total dos boletos.
+
+    Retorna (setor_bcb, pct_valor, vlr_total_setor, setor_label)
+    """
+    import pandas as _pd
+
+    # Merge para associar CNAE ao valor dos boletos
+    aux_cnae = df_aux[['id_cnpj', 'cd_cnae_prin']].copy()
+    bol_val  = df_bol.groupby('id_pagador')['vlr_nominal'].sum().reset_index()
+    bol_val.columns = ['id_cnpj', 'vlr_total']
+
+    merged = bol_val.merge(aux_cnae, on='id_cnpj', how='left')
+    merged['cd_cnae_prin'] = merged['cd_cnae_prin'].fillna('0')
+
+    # Mapear CNAE → setor BCB
+    merged['setor_bcb'] = merged['cd_cnae_prin'].apply(
+        lambda x: CNAE_SETOR.get(str(x)[:2], 'servicos')
+    )
+
+    # Agrupar por setor e calcular % do valor total
+    por_setor  = merged.groupby('setor_bcb')['vlr_total'].sum()
+    vlr_total  = por_setor.sum()
+    pct_setor  = (por_setor / vlr_total * 100).sort_values(ascending=False)
+
+    setor_pred  = pct_setor.index[0]
+    pct_pred    = pct_setor.iloc[0]
+    vlr_pred    = por_setor.iloc[0]
+
+    SETOR_LABEL = {
+        'agro': 'Agronegócio', 'industria': 'Indústria',
+        'comercio': 'Comércio', 'servicos': 'Serviços',
+        'construcao': 'Construção Civil', 'transporte': 'Transporte',
+        'alojamento': 'Alojamento e Alimentação', 'info_ti': 'TI e Informação',
+        'financeiro': 'Financeiro', 'saude': 'Saúde', 'educacao': 'Educação',
+    }
+    label = SETOR_LABEL.get(setor_pred, setor_pred.title())
+
+    return setor_pred, round(pct_pred, 1), round(vlr_pred, 2), label
+
+
+def calcular_indicador_risco_setorial(df_aux: pd.DataFrame,
+                                       df_bol: pd.DataFrame) -> dict:
+    """
+    Calcula o Indicador de Risco Setorial baseado no z-score histórico de
+    24 meses da inadimplência PJ do setor predominante (BCB SGS).
+
+    Lógica:
+      1. Identifica setor predominante por valor dos boletos
+      2. Busca 25 meses da série BCB (24 histórico + 1 atual)
+      3. Calcula média e desvio padrão dos 24 meses históricos
+      4. Calcula z-score do valor atual
+      5. Classifica tag:
+           z ≤ -0.5 → Recomendado  (inadimplência abaixo da média)
+           -0.5 < z < +0.5 → Regular (inadimplência na média)
+           z ≥ +0.5 → Atenção       (inadimplência acima da média)
+
+    Retorna dict com todos os dados para o dashboard.
+    """
+    # 1. Setor predominante
+    setor, pct_valor, vlr_setor, setor_label = identificar_setor_predominante(
+        df_aux, df_bol
+    )
+
+    # 2. Série histórica — 25 meses (24 + atual)
+    codigo_serie = SERIES_SETOR.get(setor, 21082)
+    df_hist = _bcb_serie_historico(codigo_serie, n=25)
+    fonte = 'api'
+
+    if df_hist.empty or len(df_hist) < 5:
+        # Fallback com dados de referência
+        vals_hist = FALLBACK_HISTORICO.get(setor, FALLBACK_HISTORICO['default'])
+        df_hist = pd.DataFrame({
+            'data':  pd.date_range(end=pd.Timestamp.today(), periods=25, freq='ME'),
+            'valor': vals_hist
+        })
+        fonte = 'fallback'
+
+    # Garantir ordenação cronológica
+    df_hist = df_hist.sort_values('data').reset_index(drop=True)
+
+    # 3. Separar histórico (24) e valor atual (último)
+    historico = df_hist.iloc[:-1]['valor'].values  # 24 meses anteriores
+    valor_atual = float(df_hist.iloc[-1]['valor'])
+    data_atual  = df_hist.iloc[-1]['data']
+
+    media_24m  = float(np.mean(historico))
+    desvio_24m = float(np.std(historico, ddof=1))
+
+    # 4. Z-score
+    if desvio_24m > 0:
+        z = (valor_atual - media_24m) / desvio_24m
+    else:
+        z = 0.0
+
+    # 5. Tag
+    if z <= -0.5:
+        tag, cor, emoji = 'Recomendado', '#00cc70', '✅'
+        interpretacao = (
+            f"A inadimplência do setor está {abs(z):.2f} desvios abaixo da média "
+            f"histórica dos últimos 24 meses — momento favorável para aquisição."
+        )
+    elif z < 0.5:
+        tag, cor, emoji = 'Regular', '#F59E0B', '🔶'
+        interpretacao = (
+            f"A inadimplência do setor está dentro da faixa histórica normal "
+            f"(z-score: {z:+.2f}) — momento neutro para aquisição."
+        )
+    else:
+        tag, cor, emoji = 'Atenção', '#EF4444', '🚨'
+        interpretacao = (
+            f"A inadimplência do setor está {z:.2f} desvios acima da média "
+            f"histórica dos últimos 24 meses — momento desfavorável para aquisição."
+        )
+
+    print(f"[SafeAsset] Risco Setorial — setor: {setor_label} | "
+          f"inadimp: {valor_atual:.2f}% | z: {z:+.2f} → {tag}")
+
+    return {
+        'tag':           tag,
+        'cor':           cor,
+        'emoji':         emoji,
+        'interpretacao': interpretacao,
+        'setor':         setor,
+        'setor_label':   setor_label,
+        'pct_valor':     pct_valor,
+        'vlr_setor':     vlr_setor,
+        'codigo_serie':  codigo_serie,
+        'valor_atual':   round(valor_atual, 2),
+        'media_24m':     round(media_24m, 2),
+        'desvio_24m':    round(desvio_24m, 2),
+        'z_score':       round(z, 3),
+        'banda_sup':     round(media_24m + 0.5 * desvio_24m, 2),
+        'banda_inf':     round(media_24m - 0.5 * desvio_24m, 2),
+        'df_historico':  df_hist,
+        'fonte':         fonte,
+        'data_atual':    data_atual.strftime('%b/%Y') if hasattr(data_atual, 'strftime') else str(data_atual),
+    }
+
 def run_macro(perfil_cnae: pd.DataFrame) -> dict:
     """
     Ponto de entrada principal. Chamada por run_pipeline() após calcular_perfil_cnae().
@@ -438,4 +614,5 @@ def run_macro(perfil_cnae: pd.DataFrame) -> dict:
         'scores_setor':       setores_unicos,
         'data_coleta':        macro['data_coleta'],
         'fonte':              macro['fonte'],
+        'indicador_risco':    None,  # calculado pelo callback com df_bol
     }

@@ -724,3 +724,70 @@ def fig_prob_ml_hist(df_full: pd.DataFrame) -> go.Figure:
                 xaxis_title='Probabilidade ML — bom (%)',
                 yaxis_title='Qtd de CNPJs',
                 legend=dict(orientation='h', y=1.06, font=dict(size=10)))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INDICADOR DE RISCO SETORIAL — gráfico histórico com bandas
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fig_risco_setorial(ind_risco: dict) -> go.Figure:
+    """
+    Gráfico de linha da inadimplência setorial histórica (24 meses)
+    com faixa sombreada de referência (média ± 0.5σ) e ponto atual destacado.
+    """
+    if not ind_risco or ind_risco.get('df_historico') is None:
+        return go.Figure()
+
+    df   = ind_risco['df_historico'].copy()
+    med  = ind_risco['media_24m']
+    sup  = ind_risco['banda_sup']
+    inf  = ind_risco['banda_inf']
+    cor  = ind_risco['cor']
+    tag  = ind_risco['tag']
+
+    fig = go.Figure()
+
+    # Faixa Regular (média ± 0.5σ)
+    fig.add_trace(go.Scatter(
+        x=pd.concat([df['data'], df['data'][::-1]]),
+        y=[sup]*len(df) + [inf]*len(df),
+        fill='toself',
+        fillcolor='rgba(248,196,11,0.12)',
+        line=dict(color='rgba(0,0,0,0)'),
+        name='Faixa Regular (±0.5σ)',
+        showlegend=True,
+    ))
+
+    # Linha histórica
+    fig.add_trace(go.Scatter(
+        x=df['data'], y=df['valor'],
+        mode='lines+markers',
+        name='Inadimplência PJ (%)',
+        line=dict(color=MUTED, width=2),
+        marker=dict(size=4, color=MUTED),
+    ))
+
+    # Linha da média
+    fig.add_hline(y=med, line_dash='dash', line_color=AMBER, line_width=1.5,
+                  annotation_text=f'Média 24m: {med:.2f}%',
+                  annotation_font_color=AMBER, annotation_position='right')
+
+    # Ponto atual destacado
+    ultimo = df.iloc[-1]
+    fig.add_trace(go.Scatter(
+        x=[ultimo['data']], y=[ultimo['valor']],
+        mode='markers+text',
+        marker=dict(size=14, color=cor, symbol='circle',
+                    line=dict(color=WHITE, width=2)),
+        text=[f"  {ultimo['valor']:.2f}% — {tag}"],
+        textfont=dict(color=cor, size=11),
+        textposition='middle right',
+        name=f'Atual ({ind_risco["data_atual"]})',
+        showlegend=True,
+    ))
+
+    return _fig(fig, height=380,
+                margin=dict(l=70, r=120, t=30, b=60),
+                xaxis_title='Período',
+                yaxis_title='Inadimplência PJ (%)',
+                legend=dict(orientation='h', y=1.08, font=dict(size=10)))

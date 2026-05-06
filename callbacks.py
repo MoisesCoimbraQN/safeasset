@@ -425,6 +425,15 @@ def register_callbacks(app):
                 lambda s: calcular_score_macro_setor(ind, s)['nivel']
             )
 
+            # Calcular Indicador de Risco Setorial
+            df_bol = read_json(bol_json)
+            from macro import calcular_indicador_risco_setorial
+            try:
+                ind_risco = calcular_indicador_risco_setorial(df_aux, df_bol)
+            except Exception as _e:
+                print(f"[SafeAsset] Erro ind_risco: {_e}")
+                ind_risco = None
+
             def G(fig):
                 return dcc.Graph(figure=fig, config={'displayModeBar': False})
 
@@ -445,6 +454,62 @@ def register_callbacks(app):
                 html.Div(f'Dados: {coleta}  ·  Origem: {fonte}',
                          style={'fontSize': '11px', 'color': MUTED,
                                 'marginBottom': '16px', 'fontStyle': 'italic'}),
+
+                # ── Indicador de Risco Setorial ───────────────────────────
+                *([
+                    card([
+                        html.Div('Indicador de Risco Setorial',
+                                 style={'fontSize': '16px', 'fontWeight': '700',
+                                        'color': WHITE, 'marginBottom': '4px'}),
+                        html.Div(
+                            f'Setor predominante: {ind_risco["setor_label"]} '
+                            f'({ind_risco["pct_valor"]:.1f}% do valor da carteira) · '
+                            f'Série BCB {ind_risco["codigo_serie"]} · '
+                            f'Referência: últimos 24 meses',
+                            style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '16px'}),
+
+                        dbc.Row([
+                            dbc.Col([
+                                # Tag principal
+                                html.Div([
+                                    html.Span(ind_risco['emoji'] + '  ',
+                                              style={'fontSize': '24px'}),
+                                    html.Span(ind_risco['tag'],
+                                              style={'fontSize': '22px', 'fontWeight': '800',
+                                                     'color': ind_risco['cor']}),
+                                ], style={'marginBottom': '12px'}),
+                                html.Div(ind_risco['interpretacao'],
+                                         style={'fontSize': '13px', 'color': WHITE,
+                                                'lineHeight': '1.6', 'marginBottom': '16px'}),
+                                dbc.Row([
+                                    dbc.Col(kpi('Inadimplência Atual',
+                                        f'{ind_risco["valor_atual"]:.2f}%',
+                                        f'Referência: {ind_risco["data_atual"]}',
+                                        ind_risco['cor']), width=4),
+                                    dbc.Col(kpi('Média Histórica 24m',
+                                        f'{ind_risco["media_24m"]:.2f}%',
+                                        'Base de comparação BCB',
+                                        ACCENT), width=4),
+                                    dbc.Col(kpi('Z-score',
+                                        f'{ind_risco["z_score"]:+.2f}σ',
+                                        f'Faixa Regular: ±0.5σ',
+                                        AMBER), width=4),
+                                ], className='g-2'),
+                            ], width=5),
+                            dbc.Col([
+                                html.Div('Série Histórica — Inadimplência PJ do Setor',
+                                         style={'fontSize': '12px', 'color': MUTED,
+                                                'marginBottom': '6px'}),
+                                G(ch.fig_risco_setorial(ind_risco)),
+                            ], width=7),
+                        ], className='g-3'),
+                    ]),
+                ] if ind_risco else [
+                    html.Div('Indicador de Risco Setorial não disponível.',
+                             style={'color': MUTED, 'fontSize': '13px', 'padding': '12px'}),
+                ]),
+
+                html.Hr(style={'borderColor': BORDER, 'margin': '8px 0 20px'}),
 
                 # KPIs
                 dbc.Row([
