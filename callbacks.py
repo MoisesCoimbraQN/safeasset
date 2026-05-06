@@ -498,13 +498,10 @@ def register_callbacks(app):
 
             alerta = [] if fonte == 'api' else [
                 html.Div([
-                    html.Span('⚠️  ', style={'fontSize': '15px'}),
-                    html.Span(
-                        'Sem conexão com BCB/IBGE — exibindo dados de referência recentes.',
-                        style={'fontSize': '11px'}),
-                ], style={'background': '#2d1a00', 'border': '1px solid #F59E0B',
-                          'borderRadius': '8px', 'padding': '8px 12px',
-                          'color': '#F59E0B', 'marginBottom': '12px'}),
+                    html.Span('⚠️  Sem conexão com BCB/IBGE — exibindo dados de referência recentes.',
+                              style={'fontSize': '11px', 'color': AMBER,
+                                     'fontStyle': 'italic'}),
+                ], style={'marginBottom': '10px'}),
             ]
 
             print('[SafeAsset] Macro content montado com sucesso')
@@ -558,22 +555,6 @@ def register_callbacks(app):
                                 html.Div(ind_risco['interpretacao'],
                                          style={'fontSize': '13px', 'color': WHITE,
                                                 'lineHeight': '1.6', 'marginBottom': '12px'}),
-                                *([html.Div([
-                                    html.Span('📋 Nota Regulatória BCB:  ',
-                                              style={'fontWeight': '700', 'color': AMBER,
-                                                     'fontSize': '11px'}),
-                                    html.Span(
-                                        'O aumento da inadimplência observado desde janeiro de 2025 '
-                                        'é predominantemente metodológico. Conforme Relatório de '
-                                        'Política Monetária do BCB (Set/2025), cerca de 70% da alta '
-                                        'está associada às novas regras contábeis de instrumentos '
-                                        'financeiros, não à deterioração real do crédito. '
-                                        'Considere este contexto na interpretação do indicador.',
-                                        style={'fontSize': '11px', 'color': MUTED}),
-                                ], style={'background': '#1a1200', 'border': '1px solid #F59E0B',
-                                          'borderRadius': '8px', 'padding': '8px 14px',
-                                          'marginBottom': '14px'})]
-                                if ind_risco.get('z_score', 0) > 0 else []),
                                 dbc.Row([
                                     dbc.Col(kpi('Inadimplência Atual',
                                         f'{ind_risco["valor_atual"]:.2f}%',
@@ -588,6 +569,14 @@ def register_callbacks(app):
                                         f'Faixa Regular: ±0.5σ',
                                         AMBER), width=4),
                                 ], className='g-2'),
+                                # Nota regulatória BCB — após KPIs, sem caixa
+                                *([html.Div(
+                                    '📋 Nota BCB (Set/2025): cerca de 70% do aumento da inadimplência '
+                                    'desde jan/2025 é metodológico (novas regras contábeis de '
+                                    'instrumentos financeiros), não deterioração real do crédito.',
+                                    style={'fontSize': '11px', 'color': '#c8a84b',
+                                           'fontStyle': 'italic', 'marginTop': '10px'})]
+                                if ind_risco.get('z_score', 0) > 0 else []),
                             ], width=5),
                             dbc.Col([
                                 html.Div('Série Histórica — Inadimplência PJ do Setor',
@@ -794,11 +783,10 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                     ], style={'marginTop': '8px'}),
                     # Notas de aviso
                     *([html.Div([
-                        *[html.Div([
-                            html.Span(nota, style={'fontSize': '12px', 'color': AMBER}),
-                        ], style={'background': '#2d1a00', 'border': '1px solid #F59E0B',
-                                  'borderRadius': '8px', 'padding': '8px 14px',
-                                  'marginTop': '8px'})
+                        *[html.Div(
+                            nota,
+                            style={'fontSize': '11px', 'color': '#c8a84b',
+                                   'fontStyle': 'italic', 'marginTop': '6px'})
                           for nota in _notas],
                     ])] if _notas else []),
                 ], style={'marginBottom': '24px'}),
@@ -812,7 +800,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                                     'color': ACCENT, 'marginBottom': '16px',
                                     'borderLeft': f'4px solid {ACCENT}',
                                     'paddingLeft': '10px'}),
-                    html.Div('Classificação binária por regras de negócio Núclea (liquidez + materialidade + atraso)',
+                    html.Div('Adimplência real dos boletos — target=1 quando o sacado não possui boletos inadimplentes reais (excluindo cancelamentos comerciais)',
                              style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '16px'}),
                     dbc.Row([
                         dbc.Col(kpi(
@@ -942,7 +930,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                         html.Span('ℹ️  ', style={'fontSize': '14px'}),
                         html.Span(
                             'Divergência esperada: Score FIDC e Score ML medem dimensões distintas. '
-                            'O Score FIDC usa regras de negócio (liquidez e materialidade). '
+                            'O Score FIDC usa indicadores da Núclea (liquidez do sacado, scores de materialidade e quantidade). '
                             'O Score ML usa padrões de boletos. A divergência é um sinal de investigação, não de erro.',
                             style={'fontSize': '11px', 'color': MUTED}),
                     ], style={'marginTop': '12px', 'padding': '8px 12px',
@@ -969,17 +957,11 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                             html.Div((R.get('ind_risco') or {}).get('interpretacao','—'),
                                      style={'fontSize': '12px', 'color': MUTED,
                                             'lineHeight': '1.6'}),
-                            *([html.Div([
-                                html.Span('📋 Nota BCB:  ',
-                                          style={'fontWeight': '700', 'color': AMBER,
-                                                 'fontSize': '10px'}),
-                                html.Span(
-                                    'Alta da inadimplência desde jan/2025 é ~70% metodológica '
-                                    '(novas regras contábeis BCB), não deterioração real do crédito.',
-                                    style={'fontSize': '10px', 'color': MUTED}),
-                            ], style={'background': '#1a1200', 'border': '1px solid #F59E0B',
-                                      'borderRadius': '6px', 'padding': '6px 10px',
-                                      'marginTop': '8px'})]
+                            *([html.Div(
+                                '📋 Nota BCB (Set/2025): alta da inadimplência desde jan/2025 é '
+                                '~70% metodológica (novas regras contábeis), não deterioração real.',
+                                style={'fontSize': '10px', 'color': '#c8a84b',
+                                       'fontStyle': 'italic', 'marginTop': '6px'})]
                             if (R.get('ind_risco') or {}).get('z_score', 0) > 0 else []),
                         ], width=7),
                         dbc.Col([
@@ -1177,7 +1159,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
             dcc.Tab(label='🎯 Target & Correlação', style=tab_style, selected_style=tab_sel,
               children=[html.Div(style={'padding': '24px'}, children=[
                 section_title('5–6. Target e Correlação',
-                    f'Regra 2 de 3: score_quantidade ≥ {int(mat_thresh)} · score_materialidade ≥ {int(mat_thresh)} · liquidez_3m ≥ {liq_thresh}'),
+                    f'Adimplência real: target=1 se sacado sem boletos inadimplentes reais · Parâmetros usados como fallback'),
                 card([html.Div('Distribuição do Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_target_pizza(df_full))]),
                 card([html.Div('Score Materialidade v2 por Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_boxplot_target(df_full, 'score_materialidade_v2', 'Score Materialidade v2'))]),
                 card([html.Div('Liquidez Sacado (1m) por Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_boxplot_target(df_full, 'sacado_indice_liquidez_1m', 'Índice de Liquidez (1m)'))]),
