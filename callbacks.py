@@ -661,6 +661,43 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
     boas_pct    = df_full['target'].mean() * 100
     n_suspeitos = fraude_stats['cnpjs_suspeitos']
 
+    # ── Regra de Recomendação Final ────────────────────────────────────────
+    _score_med  = df_full['score_fidc'].mean()
+    _pct_ab     = df_full['rating_carteira'].isin(['A — Excelente','B — Bom']).mean() * 100
+    _pct_de     = df_full['rating_carteira'].isin(['D — Risco Elevado','E — Alto Risco']).mean() * 100
+    _pct_fraude = df_full['flag_risco_fraude'].mean() * 100 if 'flag_risco_fraude' in df_full.columns else 0
+    _pct_diverg = df_full['alerta_divergencia'].mean() * 100 if 'alerta_divergencia' in df_full.columns else 0
+    _n_diverg   = int(df_full['alerta_divergencia'].sum()) if 'alerta_divergencia' in df_full.columns else 0
+    _macro_tag  = (R.get('ind_risco') or {}).get('tag', 'Regular')
+
+    if _score_med >= 700 and _pct_ab >= 50 and _pct_fraude < 1:
+        _rec_tag = 'Recomendado'
+        _rec_label = '✅  RECOMENDADO'
+        _rec_bg = ACCENT2
+    elif _score_med >= 500 and _pct_ab >= 30 and _pct_fraude < 3:
+        _rec_tag = 'Recomendado com Atenção'
+        _rec_label = '⚠️  RECOMENDADO COM ATENÇÃO'
+        _rec_bg = AMBER
+    else:
+        _rec_tag = 'Não Recomendado'
+        _rec_label = '🚨  NÃO RECOMENDADO'
+        _rec_bg = WARN
+
+    # Notas de aviso
+    _notas = []
+    if _macro_tag == 'Atenção' and _rec_tag == 'Recomendado':
+        _notas.append(
+            '⚠️ Macro: Recomendação mantida pelos indicadores dos sacados, mas o contexto '
+            'macroeconômico do setor está desfavorável. Recomenda-se análise dos indicadores '
+            'macro por um especialista antes da aquisição.'
+        )
+    if _pct_diverg > 5:
+        _notas.append(
+            f'⚠️ Divergência ML: {_n_diverg} CNPJs ({_pct_diverg:.1f}%) apresentam divergência '
+            'entre o Score FIDC e o modelo ML. Recomenda-se análise individual desses CNPJs '
+            'antes da aquisição.'
+        )
+
     kpi_row = dbc.Row([
         dbc.Col(kpi('Total CNPJs',    f'{total:,}',        'base analisada'),                        width=2),
         dbc.Col(kpi('Rating A',       f'{n_excel:,}',      f'{n_excel/total*100:.0f}%',    ACCENT2), width=2),
@@ -700,20 +737,28 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                              style={'fontSize': '13px', 'color': MUTED, 'marginTop': '4px'}),
                 ], style={'marginBottom': '24px'}),
 
-                # ── Veredicto geral ───────────────────────────────────────
+                # ── Veredicto geral — Regra multicritério ─────────────────
                 html.Div([
-                    html.Span(
-                        '✅ CARTEIRA RECOMENDÁVEL' if df_full['score_fidc'].mean() >= 600
-                        else ('⚠️ CARTEIRA COM RESSALVAS' if df_full['score_fidc'].mean() >= 400
-                              else '🚨 CARTEIRA DE ALTO RISCO'),
-                        style={
-                            'background': ACCENT2 if df_full['score_fidc'].mean() >= 600
-                                          else (AMBER if df_full['score_fidc'].mean() >= 400 else WARN),
-                            'color': NAVY, 'fontWeight': '800', 'fontSize': '15px',
-                            'padding': '8px 24px', 'borderRadius': '24px',
-                        }
-                    ),
-                ], style={'marginBottom': '28px'}),
+                    html.Span(_rec_label, style={
+                        'background': _rec_bg,
+                        'color': NAVY, 'fontWeight': '800', 'fontSize': '15px',
+                        'padding': '8px 24px', 'borderRadius': '24px',
+                    }),
+                    # Critérios usados
+                    html.Div([
+                        html.Span('Score médio ≥ 700 · % A+B ≥ 50% · Fraude < 1% · Macro ∈ {Recomendado, Regular}',
+                                  style={'fontSize': '10px', 'color': MUTED}),
+                    ], style={'marginTop': '8px'}),
+                    # Notas de aviso
+                    *([html.Div([
+                        *[html.Div([
+                            html.Span(nota, style={'fontSize': '12px', 'color': AMBER}),
+                        ], style={'background': '#2d1a00', 'border': '1px solid #F59E0B',
+                                  'borderRadius': '8px', 'padding': '8px 14px',
+                                  'marginTop': '8px'})
+                          for nota in _notas],
+                    ])] if _notas else []),
+                ], style={'marginBottom': '24px'}),
 
                 # ════════════════════════════════════════════════════════
                 # BLOCO 0 — Recomendação pelo Target
