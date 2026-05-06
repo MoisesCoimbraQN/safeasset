@@ -345,6 +345,56 @@ def register_callbacks(app):
                              liq_thresh=liq_thresh or 0.65, mat_thresh=mat_thresh or 800)
         return build_rank_table(R['df_full'], cnpj_q, sel_ufs, sel_cnaes, sel_ratings, score_range)
 
+
+    # ── CALLBACK DOWNLOAD — CNPJs para análise individual ─────────────────
+    @app.callback(
+        Output('download-analise', 'data'),
+        Input('btn-download-analise', 'n_clicks'),
+        State('store-raw-aux', 'data'),
+        State('store-raw-bol', 'data'),
+        prevent_initial_call=True,
+    )
+    def download_analise(n_clicks, aux_json, bol_json):
+        if not n_clicks or not aux_json or not bol_json:
+            from dash.exceptions import PreventUpdate
+            raise PreventUpdate
+
+        try:
+            df_aux = read_json(aux_json)
+            df_bol = read_json(bol_json)
+
+            # Rodar pipeline mínimo para obter df_full com score e divergência
+            import pipeline as pl
+            R = pl.run_pipeline(df_aux.copy(), df_bol.copy())
+            df = R['df_full']
+
+            # Selecionar CNPJs com alerta de divergência
+            cols = ['id_cnpj', 'uf', 'cd_cnae_prin', 'score_fidc',
+                    'rating_carteira']
+            if 'prob_ml_bom' in df.columns:
+                cols += ['prob_ml_bom', 'alerta_divergencia']
+            if 'flag_risco_fraude' in df.columns:
+                cols += ['flag_risco_fraude', 'motivo_alerta']
+
+            cols = [c for c in cols if c in df.columns]
+
+            if 'alerta_divergencia' in df.columns:
+                df_export = df[df['alerta_divergencia'] == 1][cols].copy()
+            else:
+                df_export = df[cols].copy()
+
+            df_export = df_export.sort_values('score_fidc', ascending=False)
+            df_export.columns = [c.replace('_', ' ').title() for c in df_export.columns]
+
+            return dcc.send_data_frame(
+                df_export.to_csv, 'safeasset_cnpjs_analise_individual.csv',
+                index=False, sep=';', decimal=','
+            )
+        except Exception as e:
+            from dash.exceptions import PreventUpdate
+            print(f"[SafeAsset] Erro download: {e}")
+            raise PreventUpdate
+
     # ── CALLBACK MACRO — dispara quando aba é aberta ou store muda ──────
     @app.callback(
         Output('macro-content', 'children'),
@@ -534,9 +584,12 @@ def register_callbacks(app):
                     ], width=7),
                     dbc.Col([
                         card([
-                            html.Div('Variação do PIB (IBGE)',
+                            html.Div('PIB e Contexto Geral',
                                      style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
-                            G(ch.fig_pib_variacao(ind)),
+                            dbc.Row([
+                                dbc.Col(kpi('PIB Anual', f'{ind.get("pib_variacao_anual","—")}%', 'variação IBGE', ACCENT2), width=6),
+                                dbc.Col(kpi('PIB Trimestral', f'{ind.get("pib_variacao_trimestral","—")}%', 'IBGE SIDRA', ACCENT2), width=6),
+                            ], className='g-2'),
                         ]),
                     ], width=5),
                 ], className='g-3'),
@@ -822,6 +875,85 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                               'background': '#0a1e30', 'borderRadius': '6px',
                               'border': f'1px solid {BORDER}'}),
                 ])] if 'alerta_divergencia' in df_full.columns else []),
+
+                # ── Resumo Indicador de Risco Setorial ───────────────────────────
+                *([card([
+                    html.Div('🌐 Indicador de Risco Setorial',
+                             style={'fontSize': '15px', 'fontWeight': '700',
+                                    'color': WHITE, 'marginBottom': '12px',
+                                    'borderLeft': f'4px solid {R["ind_risco"]["cor"]}',
+                                    'paddingLeft': '10px'}),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Div([
+                                html.Span(R['ind_risco']['emoji'] + '  ',
+                                          style={'fontSize': '20px'}),
+                                html.Span(R['ind_risco']['tag'],
+                                          style={'fontSize': '18px', 'fontWeight': '800',
+                                                 'color': R['ind_risco']['cor']}),
+                            ], style={'marginBottom': '8px'}),
+                            html.Div(R['ind_risco']['interpretacao'],
+                                     style={'fontSize': '12px', 'color': MUTED,
+                                            'lineHeight': '1.6'}),
+                        ], width=7),
+                        dbc.Col([
+                            dbc.Row([
+                                dbc.Col(kpi('Setor', R['ind_risco']['setor_label'],
+                                    f'{R["ind_risco"]["pct_valor"]:.1f}% do valor',
+                                    ACCENT), width=6),
+                                dbc.Col(kpi('Inadimp. Atual',
+                                    f'{R["ind_risco"]["valor_atual"]:.2f}%',
+                                    f'Média 24m: {R["ind_risco"]["media_24m"]:.2f}%',
+                                    R['ind_risco']['cor']), width=6),
+                            ], className='g-2'),
+                            html.Div(
+                                f'Z-score: {R["ind_risco"]["z_score"]:+.2f}σ  ·  '
+                                f'Faixa Regular: ±0.5σ  ·  '
+                                f'Acesse aba 🌐 Macro para o histórico completo.',
+                                style={'fontSize': '10px', 'color': MUTED,
+                                       'marginTop': '10px', 'fontStyle': 'italic'}),
+                        ], width=5),
+                    ], className='g-3'),
+                ])] if R.get('ind_risco') else []),
+
+                # ── Download — CNPJs para análise individual ──────────────────
+                card([
+                    html.Div('📥 CNPJs para Análise Individual',
+                             style={'fontSize': '15px', 'fontWeight': '700',
+                                    'color': WHITE, 'marginBottom': '8px',
+                                    'borderLeft': f'4px solid {WARN}',
+                                    'paddingLeft': '10px'}),
+                    html.Div(
+                        'CNPJs com sinais de divergência entre Score FIDC e Score ML '
+                        '— recomenda-se análise individual antes da aquisição.',
+                        style={'fontSize': '12px', 'color': MUTED, 'marginBottom': '16px'}),
+                    *([
+                        html.Div([
+                            html.Span(
+                                f'{int(df_full["alerta_divergencia"].sum()):,} CNPJs identificados  ·  ',
+                                style={'fontSize': '13px', 'color': WHITE}),
+                            html.Span('Score FIDC · Rating · Prob. ML',
+                                style={'fontSize': '12px', 'color': MUTED}),
+                        ], style={'marginBottom': '12px'}),
+                        dcc.Download(id='download-analise'),
+                        html.Button(
+                            '⬇ Baixar CSV — CNPJs para Análise',
+                            id='btn-download-analise',
+                            n_clicks=0,
+                            style={
+                                'background': BLUE, 'color': WARN,
+                                'border': f'1px solid {WARN}',
+                                'borderRadius': '8px', 'padding': '10px 20px',
+                                'fontWeight': '700', 'cursor': 'pointer',
+                                'fontFamily': "'Space Grotesk',sans-serif",
+                                'fontSize': '13px',
+                            }
+                        ),
+                    ] if 'alerta_divergencia' in df_full.columns else [
+                        html.Div('Dados não disponíveis.',
+                                 style={'color': MUTED, 'fontSize': '13px'}),
+                    ]),
+                ]),
 
                 # ── Recomendação textual ──────────────────────────────────
                 html.Div(style={
