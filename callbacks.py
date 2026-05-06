@@ -572,27 +572,13 @@ def register_callbacks(app):
                 ], className='g-3', style={'marginBottom': '20px'}),
 
                 # Score macro + PIB
-                dbc.Row([
-                    dbc.Col([
-                        card([
-                            html.Div('Score Macroeconômico por Setor da Carteira',
-                                     style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '4px'}),
-                            html.Div('Inadimplência setorial (40%) · PIB (25%) · SELIC (15%) · IPCA (10%) · Indicador setorial (10%)',
-                                     style={'fontSize': '10px', 'color': MUTED, 'marginBottom': '10px'}),
-                            G(ch.fig_score_macro_setores(scores)),
-                        ]),
-                    ], width=7),
-                    dbc.Col([
-                        card([
-                            html.Div('PIB e Contexto Geral',
-                                     style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
-                            dbc.Row([
-                                dbc.Col(kpi('PIB Anual', f'{ind.get("pib_variacao_anual","—")}%', 'variação IBGE', ACCENT2), width=6),
-                                dbc.Col(kpi('PIB Trimestral', f'{ind.get("pib_variacao_trimestral","—")}%', 'IBGE SIDRA', ACCENT2), width=6),
-                            ], className='g-2'),
-                        ]),
-                    ], width=5),
-                ], className='g-3'),
+                card([
+                    html.Div('Score Macroeconômico por Setor da Carteira',
+                             style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '4px'}),
+                    html.Div('Inadimplência setorial (40%) · PIB (25%) · SELIC (15%) · IPCA (10%) · Indicador setorial (10%)',
+                             style={'fontSize': '10px', 'color': MUTED, 'marginBottom': '10px'}),
+                    G(ch.fig_score_macro_setores(scores)),
+                ]),
 
                 # Tabela setorial
                 card([
@@ -773,12 +759,12 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                         dbc.Col(kpi('Score Médio',
                             f'{df_full["score_fidc"].mean():.0f}',
                             f'Mín: {df_full["score_fidc"].min():.0f}  ·  Máx: {df_full["score_fidc"].max():.0f}',
-                            ACCENT), width=3),
+                            ACCENT), width=2),
                         *[dbc.Col(kpi(
                             rating.split('—')[0].strip(),
                             f'{int((df_full["rating_carteira"]==rating).sum()):,}',
                             f'{(df_full["rating_carteira"]==rating).mean()*100:.1f}%',
-                            RATING_COLOR.get(rating, WHITE)), width=1)
+                            RATING_COLOR.get(rating, WHITE)), width=2)
                           for rating in ['A — Excelente','B — Bom','C — Risco Moderado','D — Risco Elevado','E — Alto Risco']
                           if rating in df_full['rating_carteira'].values],
                     ], className='g-2'),
@@ -881,33 +867,34 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                     html.Div('🌐 Indicador de Risco Setorial',
                              style={'fontSize': '15px', 'fontWeight': '700',
                                     'color': WHITE, 'marginBottom': '12px',
-                                    'borderLeft': f'4px solid {R["ind_risco"]["cor"]}',
+                                    'borderLeft': f'4px solid {(R.get("ind_risco") or {}).get("cor", ACCENT)}',
                                     'paddingLeft': '10px'}),
                     dbc.Row([
                         dbc.Col([
                             html.Div([
-                                html.Span(R['ind_risco']['emoji'] + '  ',
+                                html.Span((R.get('ind_risco') or {}).get('emoji','—') + '  ',
                                           style={'fontSize': '20px'}),
-                                html.Span(R['ind_risco']['tag'],
+                                html.Span((R.get('ind_risco') or {}).get('tag','—'),
                                           style={'fontSize': '18px', 'fontWeight': '800',
-                                                 'color': R['ind_risco']['cor']}),
+                                                 'color': (R.get('ind_risco') or {}).get('cor', ACCENT)}),
                             ], style={'marginBottom': '8px'}),
-                            html.Div(R['ind_risco']['interpretacao'],
+                            html.Div((R.get('ind_risco') or {}).get('interpretacao','—'),
                                      style={'fontSize': '12px', 'color': MUTED,
                                             'lineHeight': '1.6'}),
                         ], width=7),
                         dbc.Col([
                             dbc.Row([
-                                dbc.Col(kpi('Setor', R['ind_risco']['setor_label'],
-                                    f'{R["ind_risco"]["pct_valor"]:.1f}% do valor',
+                                dbc.Col(kpi('Setor',
+                                    (R.get('ind_risco') or {}).get('setor_label','—'),
+                                    f'{(R.get("ind_risco") or {}).get("pct_valor",0):.1f}% do valor',
                                     ACCENT), width=6),
                                 dbc.Col(kpi('Inadimp. Atual',
-                                    f'{R["ind_risco"]["valor_atual"]:.2f}%',
-                                    f'Média 24m: {R["ind_risco"]["media_24m"]:.2f}%',
-                                    R['ind_risco']['cor']), width=6),
+                                    f'{(R.get("ind_risco") or {}).get("valor_atual",0):.2f}%',
+                                    f'Média 24m: {(R.get("ind_risco") or {}).get("media_24m",0):.2f}%',
+                                    (R.get('ind_risco') or {}).get('cor', ACCENT)), width=6),
                             ], className='g-2'),
                             html.Div(
-                                f'Z-score: {R["ind_risco"]["z_score"]:+.2f}σ  ·  '
+                                f'Z-score: {(R.get("ind_risco") or {}).get("z_score",0):+.2f}σ  ·  '
                                 f'Faixa Regular: ±0.5σ  ·  '
                                 f'Acesse aba 🌐 Macro para o histórico completo.',
                                 style={'fontSize': '10px', 'color': MUTED,
