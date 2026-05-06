@@ -314,6 +314,15 @@ def register_callbacks(app):
                                 'padding': '12px', 'borderRadius': '6px', 'overflow': 'auto'}),
             ], style={'padding': '24px'}), ''
 
+        # ── Calcular Indicador de Risco Setorial ──────────────────────────
+        try:
+            from macro import calcular_indicador_risco_setorial
+            R['ind_risco'] = calcular_indicador_risco_setorial(df_aux, df_bol)
+            print(f"[SafeAsset] ind_risco: {R['ind_risco']['tag']} — {R['ind_risco']['setor_label']}")
+        except Exception as _e:
+            print(f"[SafeAsset] ind_risco erro: {_e}")
+            R['ind_risco'] = None
+
         # ── Montar dashboard ──────────────────────────────────────────────
         dashboard = build_dashboard(R, liq_thresh or 0.65, mat_thresh or 800)
         return dashboard, ''
@@ -510,13 +519,31 @@ def register_callbacks(app):
                     card([
                         html.Div('Indicador de Risco Setorial',
                                  style={'fontSize': '16px', 'fontWeight': '700',
-                                        'color': WHITE, 'marginBottom': '4px'}),
-                        html.Div(
-                            f'Setor predominante: {ind_risco["setor_label"]} '
-                            f'({ind_risco["pct_valor"]:.1f}% do valor da carteira) · '
-                            f'Série BCB {ind_risco["codigo_serie"]} · '
-                            f'Referência: últimos 24 meses',
-                            style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '16px'}),
+                                        'color': WHITE, 'marginBottom': '8px'}),
+                        # Destaque do setor analisado
+                        html.Div([
+                            html.Span('🏭 Setor analisado: ',
+                                      style={'fontSize': '12px', 'color': MUTED,
+                                             'fontWeight': '600'}),
+                            html.Span(ind_risco['setor_label'],
+                                      style={'fontSize': '14px', 'fontWeight': '800',
+                                             'color': ind_risco['cor']}),
+                            html.Span(f'  ·  {ind_risco["pct_valor"]:.1f}% do valor total da carteira',
+                                      style={'fontSize': '12px', 'color': MUTED}),
+                            html.Span(f'  ·  Série BCB {ind_risco["codigo_serie"]}',
+                                      style={'fontSize': '11px', 'color': MUTED,
+                                             'fontStyle': 'italic'}),
+                        ], style={
+                            'background': '#0a1e30',
+                            'border': f'2px solid {ind_risco["cor"]}',
+                            'borderRadius': '8px',
+                            'padding': '10px 16px',
+                            'marginBottom': '16px',
+                            'display': 'flex',
+                            'alignItems': 'center',
+                            'gap': '4px',
+                            'flexWrap': 'wrap',
+                        }),
 
                         dbc.Row([
                             dbc.Col([
@@ -530,7 +557,23 @@ def register_callbacks(app):
                                 ], style={'marginBottom': '12px'}),
                                 html.Div(ind_risco['interpretacao'],
                                          style={'fontSize': '13px', 'color': WHITE,
-                                                'lineHeight': '1.6', 'marginBottom': '16px'}),
+                                                'lineHeight': '1.6', 'marginBottom': '12px'}),
+                                *([html.Div([
+                                    html.Span('📋 Nota Regulatória BCB:  ',
+                                              style={'fontWeight': '700', 'color': AMBER,
+                                                     'fontSize': '11px'}),
+                                    html.Span(
+                                        'O aumento da inadimplência observado desde janeiro de 2025 '
+                                        'é predominantemente metodológico. Conforme Relatório de '
+                                        'Política Monetária do BCB (Set/2025), cerca de 70% da alta '
+                                        'está associada às novas regras contábeis de instrumentos '
+                                        'financeiros, não à deterioração real do crédito. '
+                                        'Considere este contexto na interpretação do indicador.',
+                                        style={'fontSize': '11px', 'color': MUTED}),
+                                ], style={'background': '#1a1200', 'border': '1px solid #F59E0B',
+                                          'borderRadius': '8px', 'padding': '8px 14px',
+                                          'marginBottom': '14px'})]
+                                if ind_risco.get('z_score', 0) > 0 else []),
                                 dbc.Row([
                                     dbc.Col(kpi('Inadimplência Atual',
                                         f'{ind_risco["valor_atual"]:.2f}%',
@@ -926,6 +969,18 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                             html.Div((R.get('ind_risco') or {}).get('interpretacao','—'),
                                      style={'fontSize': '12px', 'color': MUTED,
                                             'lineHeight': '1.6'}),
+                            *([html.Div([
+                                html.Span('📋 Nota BCB:  ',
+                                          style={'fontWeight': '700', 'color': AMBER,
+                                                 'fontSize': '10px'}),
+                                html.Span(
+                                    'Alta da inadimplência desde jan/2025 é ~70% metodológica '
+                                    '(novas regras contábeis BCB), não deterioração real do crédito.',
+                                    style={'fontSize': '10px', 'color': MUTED}),
+                            ], style={'background': '#1a1200', 'border': '1px solid #F59E0B',
+                                      'borderRadius': '6px', 'padding': '6px 10px',
+                                      'marginTop': '8px'})]
+                            if (R.get('ind_risco') or {}).get('z_score', 0) > 0 else []),
                         ], width=7),
                         dbc.Col([
                             dbc.Row([
