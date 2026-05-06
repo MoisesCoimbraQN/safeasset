@@ -217,7 +217,6 @@ def register_callbacks(app):
         Input('btn-run',         'n_clicks'),
         Input('btn-run-upload',  'n_clicks'),
         Input('btn-run-ml',      'n_clicks'),
-        Input('btn-run-target',  'n_clicks'),
         Input('btn-run-fraud',   'n_clicks'),
         Input('store-raw-aux',   'data'),
         Input('store-raw-bol',   'data'),   # dispara quando bol é carregado
@@ -228,16 +227,14 @@ def register_callbacks(app):
         Input('flt-date',        'end_date'),
         State('sl-test',  'value'),
         State('sl-trees', 'value'),
-        State('sl-liq',   'value'),
-        State('sl-mat',   'value'),
         State('sl-dup-thresh',  'value'),
         State('sl-emit-thresh', 'value'),
         prevent_initial_call=True,
     )
-    def run_dashboard(run_clicks, run_upload_clicks, ml_clicks, target_clicks, fraud_clicks,
+    def run_dashboard(run_clicks, run_upload_clicks, ml_clicks, fraud_clicks,
                       aux_json_input, bol_json,
                       cnpj_q, sel_ufs, sel_cnaes, date_from, date_to,
-                      test_size, n_trees, liq_thresh, mat_thresh,
+                      test_size, n_trees,
                       dup_thresh, emit_thresh):
 
         from dash.exceptions import PreventUpdate
@@ -299,8 +296,8 @@ def register_callbacks(app):
                 df_aux.copy(), df_bol.copy(),
                 test_size          = test_size  or 0.2,
                 n_estimators       = n_trees    or 300,
-                liq_thresh         = liq_thresh or 0.65,
-                mat_thresh         = mat_thresh or 800,
+                liq_thresh         = 0.65,
+                mat_thresh         = 800,
                 pct_dup_thresh     = (dup_thresh  or 5)  / 100,
                 n_emitentes_thresh = emit_thresh or 10,
             )
@@ -324,7 +321,7 @@ def register_callbacks(app):
             R['ind_risco'] = None
 
         # ── Montar dashboard ──────────────────────────────────────────────
-        dashboard = build_dashboard(R, liq_thresh or 0.65, mat_thresh or 800)
+        dashboard = build_dashboard(R, 0.65, 800)
         return dashboard, ''
 
     # ── Filtros do ranking ─────────────────────────────────────────────────
@@ -339,19 +336,17 @@ def register_callbacks(app):
         State('store-raw-bol', 'data'),
         State('sl-test',  'value'),
         State('sl-trees', 'value'),
-        State('sl-liq',   'value'),
-        State('sl-mat',   'value'),
         prevent_initial_call=True,
     )
     def update_rank_table(cnpj_q, sel_ufs, sel_cnaes, sel_ratings, score_range,
-                          aux_json, bol_json, test_size, n_trees, liq_thresh, mat_thresh):
+                          aux_json, bol_json, test_size, n_trees):
         if not aux_json or not bol_json:
             return html.Div('Dados não carregados.', style={'color': MUTED})
         df_aux = read_json(aux_json)
         df_bol = read_json(bol_json)
         R = pl.run_pipeline(df_aux.copy(), df_bol.copy(),
                              test_size=test_size or 0.2, n_estimators=n_trees or 300,
-                             liq_thresh=liq_thresh or 0.65, mat_thresh=mat_thresh or 800)
+                             liq_thresh=0.65, mat_thresh=800)
         return build_rank_table(R['df_full'], cnpj_q, sel_ufs, sel_cnaes, sel_ratings, score_range)
 
 

@@ -181,45 +181,8 @@ def build_sidebar():
         ]),
         ]),
 
-        # Parâmetros do Target — recolhível
-        html.Details(open=False, style={'marginBottom': '12px'}, children=[
-            html.Summary('🎯  Parâmetros do Target', style={
-                'fontWeight': '600', 'fontSize': '13px', 'color': ACCENT2,
-                'cursor': 'pointer', 'padding': '10px 14px',
-                'background': BLUE, 'borderRadius': '8px',
-                'border': f'1px solid {BORDER}', 'listStyle': 'none',
-                'userSelect': 'none',
-            }),
-            html.Div(style={'background': CARD_BG, 'border': f'1px solid {BORDER}',
-                            'borderTop': 'none', 'borderRadius': '0 0 8px 8px',
-                            'padding': '14px'}, children=[
-                html.Div('Parâmetros de fallback — target é definido por adimplência real dos boletos',
-                         style={'fontSize': '10px', 'color': MUTED,
-                                'marginBottom': '10px', 'fontStyle': 'italic'}),
-                label_sm('Fallback — Liquidez 3m mínima'),
-                dcc.Slider(id='sl-liq', min=0.50, max=0.90, step=0.05, value=0.65,
-                           marks={0.50:{'label':'0.5','style':{'color':'#8892a4','fontSize':'10px'}},
-                                  0.65:{'label':'0.65','style':{'color':'#00d4ff','fontSize':'10px'}},
-                                  0.90:{'label':'0.9','style':{'color':'#8892a4','fontSize':'10px'}}},
-                           tooltip={'always_visible': False}),
-                html.Br(),
-                label_sm('Fallback — Score Materialidade mínimo'),
-                dcc.Slider(id='sl-mat', min=600, max=970, step=50, value=800,
-                           marks={600:{'label':'600','style':{'color':'#8892a4','fontSize':'10px'}},
-                                  800:{'label':'800','style':{'color':'#00d4ff','fontSize':'10px'}},
-                                  900:{'label':'900','style':{'color':'#8892a4','fontSize':'10px'}},
-                                  970:{'label':'970','style':{'color':'#8892a4','fontSize':'10px'}}},
-                           tooltip={'always_visible': False}),
-                html.Button('🔄 Aplicar Parâmetros do Target', id='btn-run-target', n_clicks=0,
-                            style={'width':'100%','background':'#1e3a5f','color':'#00ff88',
-                                   'border':'1px solid #00ff88','borderRadius':'6px',
-                                   'padding':'7px','fontWeight':'700','cursor':'pointer',
-                                   'fontFamily':"'Space Grotesk',sans-serif",
-                                   'fontSize':'11px','marginTop':'10px'}),
-            ]),
-        ]),
 
-        # Detecção de Fraude — recolhível
+                # Detecção de Fraude — recolhível
         html.Details(open=False, style={'marginBottom': '12px'}, children=[
             html.Summary('🚨  Detecção de Fraude', style={
                 'fontWeight': '600', 'fontSize': '13px', 'color': WARN,
