@@ -32,28 +32,22 @@ except ImportError:
 # CONSTANTES
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Features do modelo — NÃO incluir as que definem o target (data leakage):
-# Removidas do modelo para evitar data leakage:
-# 'sacado_indice_liquidez_1m' — usada anteriormente no target (versão antiga)
-# 'score_materialidade_v2'    — usada no target como Critério 2
-# 'media_atraso_dias'         — usada anteriormente no target (versão antiga)
-# Nota: score_quantidade_v2 e indicador_liquidez_quantitativo_3m também definem
-# o target e portanto NÃO devem entrar como features do modelo.
-# Incluí-las faria o modelo aprender a regra em vez de padrões reais de crédito.
+# Features do modelo — apenas perspectiva do PAGADOR, sem leakage com o target.
+# Target = adimplência real dos boletos (vlr_baixa > 0, excluindo cancelamentos).
+# Features seguras: indicadores históricos gerais do sacado na PCR,
+# calculados de forma independente dos boletos da carteira atual.
+#
+# Removidas por leakage ou perspectiva errada:
+#   bol_* — calculadas sobre os mesmos boletos que definem o target
+#   cedente_indice_liquidez_1m — mede comportamento como CEDENTE, não pagador
 FEATURES = [
-    # Features de comportamento de pagamento — sem leakage com o target
-    # Removidas: score_quantidade_v2, score_materialidade_v2,
-    #            indicador_liquidez_quantitativo_3m, sacado_indice_liquidez_1m,
-    #            media_atraso_dias (todas usadas para definir o target)
-    'cedente_indice_liquidez_1m',      # liquidez como cedente (1m)
-    'score_materialidade_evolucao',     # score evolução — não entra no target
-    'share_vl_inad_pag_bol_6_a_15d',   # % boletos com atraso 6-15 dias
-    'bol_qtd_total',                    # volume total de boletos
-    'bol_pct_atrasado',                 # % boletos atrasados
-    'bol_pct_sem_pgto',                 # % boletos sem pagamento
-    'bol_taxa_recuperacao',             # taxa de recuperação
-    'bol_atraso_medio',                 # atraso médio dos boletos
-    'bol_pct_protestado',               # % protestados
+    'sacado_indice_liquidez_1m',           # % boletos pagos como pagador (1m)
+    'score_materialidade_evolucao',         # tendência do score de risco de pagamento
+    'score_quantidade_v2',                  # score risco por quantidade de boletos
+    'score_materialidade_v2',               # score risco por valor de boletos
+    'indicador_liquidez_quantitativo_3m',   # liquidez 3m — janela mais estável
+    'share_vl_inad_pag_bol_6_a_15d',       # % atraso leve (6-15 dias) como pagador
+    'media_atraso_dias',                    # média de dias de atraso como pagador
 ]
 
 RATING_COLOR = {
@@ -68,8 +62,15 @@ RATING_BINS   = [0, 300, 500, 700, 850, 1001]
 RATING_LABELS = ['E — Alto Risco', 'D — Risco Elevado', 'C — Risco Moderado', 'B — Bom', 'A — Excelente']
 
 # Thresholds de detecção de fraude (configuráveis)
-FRAUDE_PCT_DUP_THRESH   = 0.05   # % mínimo de boletos duplicados para levantar alerta
+FRAUDE_PCT_DUP_THRESH    = 0.05   # % mínimo de boletos duplicados para levantar alerta
 FRAUDE_N_EMITENTES_THRESH = 10   # nº de beneficiários distintos por pagador para alertar
+
+# Tipos de baixa que representam cancelamento comercial —
+# NÃO são inadimplência real do sacado
+BAIXAS_CANCELAMENTO = {
+    '5 - Baixa integral por solicitacao do cedente',
+    '8 - Baixa integral por solicitacao da instituicao destinataria',
+}
 
 # Tabela de denominações CNAE (carregada uma vez ao importar o módulo)
 import os as _os
@@ -80,18 +81,11 @@ except FileNotFoundError:
     CNAE_DENOMINACOES = pd.DataFrame(columns=['cd_cnae_fmt', 'denominacao'])
 
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPER — Conversão de código CNAE
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _formatar_cnae(val) -> str:
-    """
-    Converte o código CNAE de 7 dígitos inteiro (ex: 4645101) para o formato
-    XX.XX-D usado na tabela oficial (ex: 46.45-1).
-    Usa apenas os 5 primeiros dígitos conforme estrutura da CNAE 2.0.
-    Retorna None para valores inválidos.
-    """
     try:
         s = str(int(val))[:5]
         if len(s) < 5:
@@ -106,37 +100,11 @@ def _formatar_cnae(val) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def calcular_perfil_cnae(df_full: pd.DataFrame) -> pd.DataFrame:
-    """
-    Agrega os CNPJs por área de atuação (CNAE) e enriquece com a denominação
-    oficial da CNAE 2.0.
-
-    Para cada CNAE calcula:
-      - qtd_cnpjs          : número de CNPJs na carteira com aquele CNAE
-      - score_medio        : score FIDC médio dos CNPJs do setor
-      - pct_suspeitos      : % de CNPJs com flag_risco_fraude = 1
-      - rating_predominante: rating mais frequente entre os CNPJs do setor
-      - denominacao        : descrição oficial da atividade econômica
-
-    Parâmetros
-    ----------
-    df_full : pd.DataFrame
-        Base completa pós-pipeline (com score_fidc, rating_carteira,
-        cd_cnae_prin e flag_risco_fraude).
-
-    Retorna
-    -------
-    pd.DataFrame ordenado por qtd_cnpjs decrescente.
-    """
     df = df_full.copy()
-
-    # Converter código para formato padrão de comparação
     df['cd_cnae_fmt'] = df['cd_cnae_prin'].apply(_formatar_cnae)
-
-    # Garantir que flag_risco_fraude existe (pode não existir se fraude não rodou)
     if 'flag_risco_fraude' not in df.columns:
         df['flag_risco_fraude'] = 0
 
-    # Agregação por CNAE
     perfil = df.groupby('cd_cnae_fmt').agg(
         qtd_cnpjs           = ('id_cnpj',          'count'),
         score_medio         = ('score_fidc',         'mean'),
@@ -149,15 +117,11 @@ def calcular_perfil_cnae(df_full: pd.DataFrame) -> pd.DataFrame:
     perfil['score_medio']   = perfil['score_medio'].round(0).astype(int)
     perfil['pct_suspeitos'] = (perfil['pct_suspeitos'] * 100).round(1)
 
-    # Enriquecer com denominação oficial
     perfil = perfil.merge(CNAE_DENOMINACOES, on='cd_cnae_fmt', how='left')
     perfil['denominacao'] = perfil['denominacao'].fillna('Não identificado')
-
-    # Abreviar denominações longas para exibição em gráfico
     perfil['denominacao_curta'] = perfil['denominacao'].apply(
         lambda x: x[:45] + '…' if len(str(x)) > 45 else x
     )
-
     return perfil.sort_values('qtd_cnpjs', ascending=False).reset_index(drop=True)
 
 
@@ -168,61 +132,23 @@ def calcular_perfil_cnae(df_full: pd.DataFrame) -> pd.DataFrame:
 def detectar_duplicatas(df_bol: pd.DataFrame,
                         pct_dup_thresh: float = FRAUDE_PCT_DUP_THRESH,
                         n_emitentes_thresh: int = FRAUDE_N_EMITENTES_THRESH) -> dict:
-    """
-    Analisa a base de boletos BRUTA e identifica três tipos de duplicação:
-
-      Tipo 1 — id_boleto repetido: mesmo identificador emitido mais de uma vez.
-               Indica possível reaproveitamento fraudulento de boleto já liquidado.
-
-      Tipo 2 — Mesma combinação (vlr_nominal + dt_vencimento + id_pagador) com
-               id_boleto diferente: duplicata "disfarçada" que tenta parecer
-               um boleto novo mas repete os mesmos atributos comerciais.
-
-      Tipo 3 — Concentração de emitentes: um pagador com muitos beneficiários
-               distintos emitindo contra ele pode indicar esquema de boletos
-               fictícios coordenado entre múltiplos emitentes.
-
-    Parâmetros
-    ----------
-    df_bol              : Base de boletos (pode ser ainda não processada)
-    pct_dup_thresh      : % mínimo de boletos duplicados para flag de alerta
-    n_emitentes_thresh  : Nº de beneficiários distintos para flag de alerta
-
-    Retorna
-    -------
-    dict com chaves:
-      df_bol_marcado     : df_bol com colunas 'flag_dup_id', 'flag_dup_conteudo'
-      resumo_duplicatas  : DataFrame — 1 linha por grupo duplicado, com contagem
-      fraude_por_cnpj    : DataFrame — métricas de fraude agregadas por pagador
-      stats              : dict com totais gerais (para KPIs do dashboard)
-    """
     df = df_bol.copy()
 
-    # ── Tipo 1: id_boleto repetido ────────────────────────────────────────
     contagem_id = df.groupby('id_boleto')['id_boleto'].transform('count')
     df['flag_dup_id'] = (contagem_id > 1).astype(int)
 
-    # ── Tipo 2: mesmo conteúdo, id diferente ─────────────────────────────
-    # Chave composta: valor + vencimento + pagador + beneficiário
-    chave_cols = ['vlr_nominal', 'dt_vencimento', 'id_pagador', 'id_beneficiario']
-    # Garantir que dt_vencimento está no formato correto para agrupamento
     df['_dt_venc_str'] = pd.to_datetime(df['dt_vencimento'], errors='coerce').dt.strftime('%Y-%m-%d')
     chave_cols_str = ['vlr_nominal', '_dt_venc_str', 'id_pagador', 'id_beneficiario']
     contagem_conteudo = df.groupby(chave_cols_str)['id_boleto'].transform('count')
     df['flag_dup_conteudo'] = (contagem_conteudo > 1).astype(int)
-
-    # Flag unificado: duplicata de qualquer tipo
     df['flag_duplicata'] = ((df['flag_dup_id'] == 1) | (df['flag_dup_conteudo'] == 1)).astype(int)
 
-    # ── Resumo dos grupos duplicados ─────────────────────────────────────
-    # Usando merge para evitar conflito de nomes no reset_index (pandas 2+)
     _dup_id_grp = (df[df['flag_dup_id'] == 1]
                    .groupby('id_boleto', as_index=False)
                    .agg(qtd_ocorrencias=('id_boleto', 'count'),
                         id_pagador=('id_pagador', 'first'),
                         vlr_nominal=('vlr_nominal', 'first'))
                    .assign(tipo_duplicata='ID repetido'))
-    # Renomear id_boleto para evitar conflito no reset_index
     dup_id = _dup_id_grp[['id_pagador', 'vlr_nominal',
                            'qtd_ocorrencias', 'tipo_duplicata']].copy()
 
@@ -230,8 +156,7 @@ def detectar_duplicatas(df_bol: pd.DataFrame,
                      .groupby(chave_cols_str, as_index=False)
                      .agg(qtd_ocorrencias=('id_boleto', 'count'))
                      .rename(columns={'_dt_venc_str': 'dt_vencimento'}))
-    dup_cont = _dup_cont_grp[['id_pagador', 'vlr_nominal',
-                               'qtd_ocorrencias']].copy()
+    dup_cont = _dup_cont_grp[['id_pagador', 'vlr_nominal', 'qtd_ocorrencias']].copy()
     dup_cont['tipo_duplicata'] = 'Conteúdo idêntico'
 
     resumo = pd.concat([
@@ -239,56 +164,51 @@ def detectar_duplicatas(df_bol: pd.DataFrame,
         dup_cont[['id_pagador', 'vlr_nominal', 'qtd_ocorrencias', 'tipo_duplicata']],
     ], ignore_index=True).sort_values('qtd_ocorrencias', ascending=False)
 
-    # ── Tipo 3 + métricas por pagador ────────────────────────────────────
     fraude_cnpj = df.groupby('id_pagador').agg(
-        bol_qtd_total          = ('id_boleto',        'count'),
-        bol_qtd_dup_id         = ('flag_dup_id',      'sum'),
-        bol_qtd_dup_conteudo   = ('flag_dup_conteudo','sum'),
-        bol_qtd_dup_total      = ('flag_duplicata',   'sum'),
-        bol_n_emitentes        = ('id_beneficiario',  'nunique'),
+        bol_qtd_total        = ('id_boleto',         'count'),
+        bol_qtd_dup_id       = ('flag_dup_id',       'sum'),
+        bol_qtd_dup_conteudo = ('flag_dup_conteudo', 'sum'),
+        bol_qtd_dup_total    = ('flag_duplicata',    'sum'),
+        bol_n_emitentes      = ('id_beneficiario',   'nunique'),
     ).reset_index()
 
     fraude_cnpj['bol_pct_duplicado'] = (
         fraude_cnpj['bol_qtd_dup_total'] / fraude_cnpj['bol_qtd_total']
     ).fillna(0)
 
-    # Flag de risco de fraude: excede threshold em qualquer critério
     fraude_cnpj['flag_risco_fraude'] = (
-        (fraude_cnpj['bol_pct_duplicado']  >= pct_dup_thresh) |
-        (fraude_cnpj['bol_n_emitentes']    >= n_emitentes_thresh)
+        (fraude_cnpj['bol_pct_duplicado'] >= pct_dup_thresh) |
+        (fraude_cnpj['bol_n_emitentes']   >= n_emitentes_thresh)
     ).astype(int)
 
     fraude_cnpj['motivo_alerta'] = ''
-    mask_dup = fraude_cnpj['bol_pct_duplicado'] >= pct_dup_thresh
-    mask_emit = fraude_cnpj['bol_n_emitentes']  >= n_emitentes_thresh
+    mask_dup  = fraude_cnpj['bol_pct_duplicado'] >= pct_dup_thresh
+    mask_emit = fraude_cnpj['bol_n_emitentes']   >= n_emitentes_thresh
     fraude_cnpj.loc[mask_dup & ~mask_emit,  'motivo_alerta'] = 'Duplicatas excessivas'
     fraude_cnpj.loc[~mask_dup & mask_emit,  'motivo_alerta'] = 'Muitos emitentes'
     fraude_cnpj.loc[mask_dup & mask_emit,   'motivo_alerta'] = 'Duplicatas + Muitos emitentes'
 
-    # Estatísticas gerais para KPIs
     stats = {
-        'total_boletos':          len(df),
-        'total_dup_id':           int(df['flag_dup_id'].sum()),
-        'total_dup_conteudo':     int(df['flag_dup_conteudo'].sum()),
-        'total_duplicatas':       int(df['flag_duplicata'].sum()),
-        'pct_duplicatas':         round(df['flag_duplicata'].mean() * 100, 2),
-        'cnpjs_suspeitos':        int(fraude_cnpj['flag_risco_fraude'].sum()),
-        'total_cnpjs_com_boleto': len(fraude_cnpj),
+        'total_boletos':           len(df),
+        'total_dup_id':            int(df['flag_dup_id'].sum()),
+        'total_dup_conteudo':      int(df['flag_dup_conteudo'].sum()),
+        'total_duplicatas':        int(df['flag_duplicata'].sum()),
+        'pct_duplicatas':          round(df['flag_duplicata'].mean() * 100, 2),
+        'cnpjs_suspeitos':         int(fraude_cnpj['flag_risco_fraude'].sum()),
+        'total_cnpjs_com_boleto':  len(fraude_cnpj),
         'beneficiarios_envolvidos': int(
             df[df['flag_duplicata'] == 1]['id_beneficiario'].nunique()
         ),
-        'pct_dup_thresh':   pct_dup_thresh,
-        'n_emit_thresh':    n_emitentes_thresh,
+        'pct_dup_thresh':  pct_dup_thresh,
+        'n_emit_thresh':   n_emitentes_thresh,
     }
 
-    # Limpar coluna auxiliar
     df = df.drop(columns=['_dt_venc_str'])
-
     return {
-        'df_bol_marcado':   df,
+        'df_bol_marcado':    df,
         'resumo_duplicatas': resumo,
-        'fraude_por_cnpj':  fraude_cnpj,
-        'stats':            stats,
+        'fraude_por_cnpj':   fraude_cnpj,
+        'stats':             stats,
     }
 
 
@@ -297,7 +217,6 @@ def detectar_duplicatas(df_bol: pd.DataFrame,
 # ─────────────────────────────────────────────────────────────────────────────
 
 def processar_boletos(df_bol: pd.DataFrame) -> pd.DataFrame:
-    """Calcula atraso real e cria flags por boleto."""
     df = df_bol.copy()
     for col in ['dt_emissao', 'dt_vencimento', 'dt_pagamento']:
         df[col] = pd.to_datetime(df[col], errors='coerce')
@@ -314,11 +233,10 @@ def processar_boletos(df_bol: pd.DataFrame) -> pd.DataFrame:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def agregar_boletos(df_bol: pd.DataFrame) -> pd.DataFrame:
-    """Agrega boletos por CNPJ gerando features de comportamento de pagamento."""
     feat = df_bol.groupby('id_pagador').agg(
-        bol_qtd_total         = ('id_boleto',        'count'),
-        bol_vlr_nominal_total = ('vlr_nominal',      'sum'),
-        bol_vlr_baixa_total   = ('vlr_baixa',        'sum'),
+        bol_qtd_total         = ('id_boleto',         'count'),
+        bol_vlr_nominal_total = ('vlr_nominal',       'sum'),
+        bol_vlr_baixa_total   = ('vlr_baixa',         'sum'),
         bol_atraso_medio      = ('atraso_dias_real',  'mean'),
         bol_atraso_max        = ('atraso_dias_real',  'max'),
         bol_pct_atrasado      = ('flag_atrasado',     'mean'),
@@ -338,41 +256,52 @@ def agregar_boletos(df_bol: pd.DataFrame) -> pd.DataFrame:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def definir_target(df_full: pd.DataFrame,
-                    liq_thresh: float = 0.65,
-                    mat_thresh: float = 800):
+                   df_bol_marcado: pd.DataFrame = None,
+                   liq_thresh: float = 0.65,
+                   mat_thresh: float = 800):
     """
-    Target=1 (carteira BOA) quando pelo menos DOIS dos três critérios são atendidos:
+    Target baseado em histórico REAL de pagamento dos boletos (sem leakage).
 
-      Critério 1 — Score quantidade:    score_quantidade_v2          >= mat_thresh
-      Critério 2 — Score materialidade: score_materialidade_v2       >= mat_thresh
-      Critério 3 — Liquidez 3m cedente: indicador_liquidez_quantitativo_3m >= liq_thresh
+    Target = 1 (ADIMPLENTE) se o sacado não tem nenhum boleto inadimplente real.
+    Inadimplente real = vlr_baixa nulo ou zero, excluindo cancelamentos comerciais:
+      - '5 - Baixa integral por solicitacao do cedente'
+      - '8 - Baixa integral por solicitacao da instituicao destinataria'
 
-    Regra "2 de 3": um CNPJ não é penalizado por falhar em um único critério,
-    o que evita a exclusão por sazonalidade ou ausência de boletos em um período.
-    Remove media_atraso_dias do target — o dicionário de dados indica que
-    clientes bons podem ter valores altos nessa coluna.
-
-    Parâmetros
-    ----------
-    liq_thresh : threshold de liquidez 3m (padrão 0.65)
-    mat_thresh : threshold dos scores de quantidade e materialidade (padrão 800)
+    Fallback: se df_bol_marcado não disponível, usa regra anterior (2 de 3).
     """
     df = df_full.copy()
 
-    c1 = (df['score_quantidade_v2'].fillna(0)                >= mat_thresh).astype(int)
-    c2 = (df['score_materialidade_v2'].fillna(0)             >= mat_thresh).astype(int)
-    c3 = (df['indicador_liquidez_quantitativo_3m'].fillna(0) >= liq_thresh).astype(int)
+    if df_bol_marcado is not None and 'vlr_baixa' in df_bol_marcado.columns:
+        bol = df_bol_marcado.copy()
 
-    # target=1 quando pelo menos 2 critérios são satisfeitos
-    df['target'] = ((c1 + c2 + c3) >= 2).astype(int)
+        bol['inadimplente_real'] = (
+            (bol['vlr_baixa'].isna() | (bol['vlr_baixa'] == 0)) &
+            (~bol['tipo_baixa'].isin(BAIXAS_CANCELAMENTO))
+        ).astype(int)
 
-    # Manter p75 de atraso para compatibilidade com o resto do código
+        inad_por_pag = (bol.groupby('id_pagador')['inadimplente_real']
+                           .sum()
+                           .reset_index()
+                           .rename(columns={'id_pagador': 'id_cnpj',
+                                            'inadimplente_real': '_n_inad'}))
+
+        df = df.merge(inad_por_pag, on='id_cnpj', how='left')
+        df['_n_inad'] = df['_n_inad'].fillna(0)
+        df['target']  = (df['_n_inad'] == 0).astype(int)
+        df.drop(columns=['_n_inad'], inplace=True)
+
+        pct = df['target'].mean() * 100
+        print(f"[SafeAsset] Target (adimplência real) — "
+              f"Adimplentes: {df['target'].sum():,} ({pct:.1f}%)  "
+              f"Inadimplentes: {(df['target']==0).sum():,} ({100-pct:.1f}%)")
+
+    else:
+        raise ValueError(
+            "Base de boletos não disponível para calcular o target. "
+            "Faça o upload do arquivo base_boletos_fiap.csv."
+        )
+
     p75 = df['media_atraso_dias'].quantile(0.75) if 'media_atraso_dias' in df.columns else 0
-
-    pct = df['target'].mean() * 100
-    print(f"[SafeAsset] Target — Bons: {df['target'].sum():,} ({pct:.1f}%)  "
-          f"Ruins: {(df['target']==0).sum():,} ({100-pct:.1f}%)")
-
     return df, p75
 
 
@@ -381,7 +310,6 @@ def definir_target(df_full: pd.DataFrame,
 # ─────────────────────────────────────────────────────────────────────────────
 
 def calcular_correlacao(df_full: pd.DataFrame) -> pd.DataFrame:
-    """Matriz de correlação de Pearson entre features e target."""
     cols = [f for f in FEATURES + ['target'] if f in df_full.columns]
     return df_full[cols].corr()
 
@@ -400,11 +328,6 @@ def _make_pipeline(model) -> Pipeline:
 
 def treinar_modelos(df_full: pd.DataFrame, avail: list,
                     test_size: float, n_estimators: int):
-    """
-    Treina Logistic Regression, Random Forest e GradientBoosting/XGBoost
-    com cross-validation estratificada (k=5).
-    Retorna (resultados, X_test, y_test).
-    """
     df_model = df_full[avail + ['target']].dropna(subset=['target'])
     X = df_model[avail]
     y = df_model['target']
@@ -413,7 +336,6 @@ def treinar_modelos(df_full: pd.DataFrame, avail: list,
         X, y, test_size=test_size, random_state=42, stratify=y
     )
 
-    # Calcular peso para balancear classes desbalanceadas
     n_neg = int((y_train == 0).sum())
     n_pos = int((y_train == 1).sum())
     scale_pos = max(1.0, n_neg / n_pos) if n_pos > 0 else 1.0
@@ -467,8 +389,6 @@ def treinar_modelos(df_full: pd.DataFrame, avail: list,
             cv_scores = cv_scores.tolist(),
         )
 
-    # Calibrar probabilidades do melhor modelo (Platt scaling)
-    # Resolve o problema de probabilidades extremas (0% ou 100%) em modelos desbalanceados
     best = max(resultados, key=lambda n: resultados[n]['auc'])
     try:
         calibrated = CalibratedClassifierCV(
@@ -490,7 +410,6 @@ def treinar_modelos(df_full: pd.DataFrame, avail: list,
 
 def calcular_feature_importance(ml_results: dict, avail: list,
                                  best_name: str) -> pd.Series:
-    """Extrai importância de features do melhor modelo."""
     sm = ml_results[best_name]['pipe'].named_steps['mdl']
     if hasattr(sm, 'feature_importances_'):
         imp = sm.feature_importances_
@@ -501,60 +420,27 @@ def calcular_feature_importance(ml_results: dict, avail: list,
     return pd.Series(imp, index=avail).sort_values(ascending=False)
 
 
-
-
 # ─────────────────────────────────────────────────────────────────────────────
-# PRODUTO 2 — Probabilidade ML (segunda opinião independente)
+# PRODUTO 2 — Probabilidade ML (score auxiliar contínuo)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def calcular_prob_ml(df_full: pd.DataFrame,
                      ml_results: dict,
                      avail: list,
                      best_name: str) -> pd.DataFrame:
-    """
-    Adiciona ao df_full duas colunas com a "segunda opinião" do modelo ML:
-
-      prob_ml_bom   : probabilidade (0–1) de o CNPJ ser classificado como bom
-                      pelo melhor modelo treinado. Usa predict_proba() sobre
-                      TODOS os CNPJs (não só o conjunto de teste).
-
-      alerta_divergencia : flag de divergência entre score de negócio e modelo ML.
-                           1 quando os dois discordam sobre a qualidade do CNPJ:
-                           - Score FIDC alto (>= 800) mas prob_ml_bom baixa (< 0.30)
-                           - Score FIDC baixo (<  400) mas prob_ml_bom alta (>= 0.60)
-
-    Parâmetros
-    ----------
-    df_full    : DataFrame completo com score_fidc já calculado
-    ml_results : dicionário com os modelos treinados
-    avail      : lista de features disponíveis (sem leakage)
-    best_name  : nome do melhor modelo (maior AUC)
-
-    Retorna
-    -------
-    df_full com colunas prob_ml_bom e alerta_divergencia adicionadas
-    """
-    df = df_full.copy()
-
-    # Usar pipeline calibrado se disponível (resolve probabilidades extremas)
+    df   = df_full.copy()
     pipe = ml_results[best_name].get('pipe_calibrated', ml_results[best_name]['pipe'])
 
-    # Preparar features — apenas linhas sem NaN nas features disponíveis
-    X_todos = df[avail].copy()
+    X_todos    = df[avail].copy()
     idx_validos = X_todos.dropna().index
 
-    # Calcular probabilidade para todos os CNPJs válidos
     prob = np.zeros(len(df))
     if len(idx_validos) > 0:
         probs = pipe.predict_proba(X_todos.loc[idx_validos])
-        # Coluna 1 = probabilidade da classe positiva (bom = 1)
         prob[df.index.get_indexer(idx_validos)] = probs[:, 1]
 
-    df['prob_ml_bom'] = (prob * 100).round(1)  # em percentual 0–100
+    df['prob_ml_bom'] = (prob * 100).round(1)
 
-    # Flag de divergência — thresholds mais conservadores
-    # Score muito alto (≥ 800) mas ML muito pessimista (< 30%): risco oculto
-    # Score muito baixo (< 300) mas ML muito otimista (≥ 70%): oportunidade ignorada
     df['alerta_divergencia'] = (
         ((df['score_fidc'] >= 800) & (df['prob_ml_bom'] <  30)) |
         ((df['score_fidc'] <  300) & (df['prob_ml_bom'] >= 70))
@@ -562,25 +448,17 @@ def calcular_prob_ml(df_full: pd.DataFrame,
 
     return df
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PASSO 11 — SCORE FINAL (fórmula composta ponderada)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def calcular_score_final(df_full: pd.DataFrame) -> pd.DataFrame:
-    """
-    Score FIDC (0–1000) por fórmula composta ponderada:
-      35% Liquidez Sacado 1m       → capacidade de honrar boletos
-      25% Score Materialidade v2   → histórico consolidado Núclea
-      15% Score Quantidade v2      → consistência de volume
-      10% Liquidez Quantitativa 3m → estabilidade temporal
-       8% Atraso invertido         → penaliza atrasos
-       7% Inadimplência invertida  → detecta deterioração recente
-    """
     df = df_full.copy()
 
-    atraso_max   = df['media_atraso_dias'].quantile(0.99).clip(1)
-    atraso_norm  = (df['media_atraso_dias'].fillna(atraso_max) / atraso_max).clip(0, 1)
-    inad_norm    = df['share_vl_inad_pag_bol_6_a_15d'].fillna(0).clip(0, 1)
+    atraso_max  = df['media_atraso_dias'].quantile(0.99).clip(1)
+    atraso_norm = (df['media_atraso_dias'].fillna(atraso_max) / atraso_max).clip(0, 1)
+    inad_norm   = df['share_vl_inad_pag_bol_6_a_15d'].fillna(0).clip(0, 1)
 
     c_liquidez   = df['sacado_indice_liquidez_1m'].fillna(0).clip(0, 1)
     c_mat        = (df['score_materialidade_v2'].fillna(0) / 1000).clip(0, 1)
@@ -618,25 +496,20 @@ def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
                  liq_thresh: float = 0.65, mat_thresh: float = 800,
                  pct_dup_thresh: float = FRAUDE_PCT_DUP_THRESH,
                  n_emitentes_thresh: int = FRAUDE_N_EMITENTES_THRESH) -> dict:
-    """
-    Executa o pipeline completo (passos 2B–11) e retorna dict com
-    todos os resultados para o dashboard.
-    """
     result = {}
 
-    # ── Passo 2B: detecção de fraude (antes de qualquer transformação) ────
-    fraude = detectar_duplicatas(df_bol, pct_dup_thresh, n_emitentes_thresh)
-    result['fraude']          = fraude
-    df_bol_marcado            = fraude['df_bol_marcado']
+    # Passo 2B — detecção de fraude
+    fraude         = detectar_duplicatas(df_bol, pct_dup_thresh, n_emitentes_thresh)
+    result['fraude'] = fraude
+    df_bol_marcado   = fraude['df_bol_marcado']
 
-    # ── Passo 3: processar boletos (usa df já marcado com flags de fraude) ─
+    # Passo 3 — processar boletos
     df_bol          = processar_boletos(df_bol_marcado)
     result['df_bol'] = df_bol
 
-    # ── Passo 4: feature engineering ─────────────────────────────────────
+    # Passo 4 — feature engineering
     feat_bol = agregar_boletos(df_bol)
 
-    # Mesclar features de fraude por CNPJ no feat_bol
     fraude_cnpj = fraude['fraude_por_cnpj'][
         ['id_pagador', 'bol_pct_duplicado', 'bol_n_emitentes',
          'bol_qtd_dup_total', 'flag_risco_fraude', 'motivo_alerta']
@@ -648,12 +521,14 @@ def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
     feat_bol['bol_pct_duplicado'] = feat_bol['bol_pct_duplicado'].fillna(0)
     feat_bol['bol_n_emitentes']   = feat_bol['bol_n_emitentes'].fillna(0)
 
-    df_full  = df_aux.merge(feat_bol, on='id_cnpj', how='left')
+    df_full = df_aux.merge(feat_bol, on='id_cnpj', how='left')
 
-    df_full, p75       = definir_target(df_full, liq_thresh, mat_thresh)
+    # Passo 5 — target baseado em adimplência real dos boletos
+    df_full, p75       = definir_target(df_full, df_bol_marcado, liq_thresh, mat_thresh)
     result['p75_atraso'] = p75
     result['corr_matrix'] = calcular_correlacao(df_full)
 
+    # Passos 7-8 — modelagem ML
     avail = [f for f in FEATURES if f in df_full.columns]
     ml_results, X_test, y_test = treinar_modelos(df_full, avail, test_size, n_estimators)
 
@@ -666,13 +541,14 @@ def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
     result['best_name'] = best_name
     result['feat_imp']  = calcular_feature_importance(ml_results, avail, best_name)
 
+    # Passo 11 — score final
     df_full = calcular_score_final(df_full)
 
-    # Produto 2 — probabilidade ML como segunda opinião independente
+    # Produto 2 — score ML auxiliar
     df_full = calcular_prob_ml(df_full, ml_results, avail, best_name)
     result['df_full'] = df_full
 
-    # Perfil setorial por CNAE (roda após score para incluir rating no agregado)
+    # Perfil setorial por CNAE
     perfil_cnae = calcular_perfil_cnae(df_full)
     result['perfil_cnae'] = perfil_cnae
 
