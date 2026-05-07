@@ -593,6 +593,18 @@ def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
 
     df_full = df_aux.merge(feat_bol, on='id_cnpj', how='left')
 
+    # Flag de sacados sem histórico de boletos na PCR
+    bol_features = ['bol_qtd_total', 'bol_pct_atrasado', 'bol_taxa_recuperacao']
+    bol_disp = [f for f in bol_features if f in df_full.columns]
+    if bol_disp:
+        df_full['sem_historico'] = df_full[bol_disp[0]].isna().astype(int)
+    else:
+        df_full['sem_historico'] = 0
+    n_sem = int(df_full['sem_historico'].sum())
+    pct_sem = df_full['sem_historico'].mean() * 100
+    print(f"[SafeAsset] Histórico — com histórico: {len(df_full)-n_sem:,} "
+          f"({100-pct_sem:.1f}%)  sem histórico: {n_sem:,} ({pct_sem:.1f}%)")
+
     # Passo 5 — target baseado em adimplência real dos boletos
     df_full, p75       = definir_target(df_full, df_bol_marcado, liq_thresh, mat_thresh)
     result['p75_atraso'] = p75
