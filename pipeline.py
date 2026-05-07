@@ -487,15 +487,85 @@ def calcular_score_final(df_full: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COBERTURA DA CARTEIRA NOVA
+# ─────────────────────────────────────────────────────────────────────────────
+
+def calcular_cobertura_carteira(df_full: pd.DataFrame,
+                                 df_cart: pd.DataFrame) -> dict:
+    """
+    Analisa a cobertura da carteira nova — quantos CNPJs têm histórico PCR
+    e quantos são primeiro contato.
+
+    Retorna dict com:
+      total_cnpjs       : total de CNPJs na carteira
+      com_historico     : CNPJs com histórico PCR
+      sem_historico     : CNPJs sem histórico (primeiro contato)
+      pct_com_historico : % com histórico
+      pct_sem_historico : % sem histórico
+      recomendados      : CNPJs com histórico e rating A ou B
+      atencao           : CNPJs com histórico e rating C
+      nao_recomendados  : CNPJs com histórico e rating D ou E
+      vlr_total         : valor total da carteira
+      vlr_sem_historico : valor em risco nos CNPJs sem histórico
+    """
+    col_pag = 'id_pagador' if 'id_pagador' in df_cart.columns else 'id_cnpj'
+    cnpjs_cart = set(df_cart[col_pag].astype(str).unique())
+    total = len(cnpjs_cart)
+
+    # Cruzar com df_full que tem histórico
+    tem_hist = set(df_full[df_full['sem_historico'] == 0]['id_cnpj'].astype(str))
+    sem_hist  = set(df_full[df_full['sem_historico'] == 1]['id_cnpj'].astype(str))
+
+    n_com  = len(cnpjs_cart & tem_hist)
+    n_sem  = len(cnpjs_cart & sem_hist)
+    # CNPJs na carteira mas não na base auxiliar
+    n_novo = total - n_com - n_sem
+    n_sem  = n_sem + n_novo  # tratar não encontrados como sem histórico
+
+    # Ratings dos que têm histórico
+    df_hist = df_full[
+        (df_full['id_cnpj'].astype(str).isin(cnpjs_cart)) &
+        (df_full['sem_historico'] == 0)
+    ]
+    n_rec  = int(df_hist['rating_carteira'].isin(['A — Excelente','B — Bom']).sum())
+    n_atc  = int((df_hist['rating_carteira'] == 'C — Risco Moderado').sum())
+    n_nrec = int(df_hist['rating_carteira'].isin(['D — Risco Elevado','E — Alto Risco']).sum())
+
+    # Valores
+    vlr_total = float(df_cart['vlr_nominal'].sum()) if 'vlr_nominal' in df_cart.columns else 0
+    sem_hist_ids = cnpjs_cart - tem_hist
+    vlr_sem = float(df_cart[df_cart[col_pag].astype(str).isin(sem_hist_ids)]['vlr_nominal'].sum())               if 'vlr_nominal' in df_cart.columns else 0
+
+    print(f"[SafeAsset] Cobertura — {n_com:,} com histórico ({n_com/total*100:.1f}%) · "
+          f"{n_sem:,} sem histórico ({n_sem/total*100:.1f}%)")
+
+    return {
+        'total_cnpjs':        total,
+        'com_historico':      n_com,
+        'sem_historico':      n_sem,
+        'pct_com_historico':  round(n_com/total*100, 1) if total else 0,
+        'pct_sem_historico':  round(n_sem/total*100, 1) if total else 0,
+        'recomendados':       n_rec,
+        'atencao':            n_atc,
+        'nao_recomendados':   n_nrec,
+        'vlr_total':          round(vlr_total, 2),
+        'vlr_sem_historico':  round(vlr_sem, 2),
+    }
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ORQUESTRADOR PRINCIPAL
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
+                 df_carteira: pd.DataFrame = None,
                  test_size: float = 0.2, n_estimators: int = 300,
                  liq_thresh: float = 0.65, mat_thresh: float = 800,
                  pct_dup_thresh: float = FRAUDE_PCT_DUP_THRESH,
                  n_emitentes_thresh: int = FRAUDE_N_EMITENTES_THRESH) -> dict:
+    # df_carteira: boletos da nova carteira a ser adquirida (sem vlr_baixa)
+    # Se None, usa df_bol como proxy para demonstração
     result = {}
 
     # Passo 2B — detecção de fraude
@@ -551,5 +621,10 @@ def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
     # Perfil setorial por CNAE
     perfil_cnae = calcular_perfil_cnae(df_full)
     result['perfil_cnae'] = perfil_cnae
+
+    # ── Cobertura da carteira nova ────────────────────────────────────────
+    df_cart = df_carteira if df_carteira is not None else df_bol
+    cobertura = calcular_cobertura_carteira(df_full, df_cart)
+    result['cobertura'] = cobertura
 
     return result

@@ -791,3 +791,48 @@ def fig_risco_setorial(ind_risco: dict) -> go.Figure:
                 xaxis_title='Período',
                 yaxis_title='Inadimplência PJ (%)',
                 legend=dict(orientation='h', y=1.08, font=dict(size=10)))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GRÁFICOS PARA ABA CNPJs NOVOS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fig_uf_distribuicao(df: pd.DataFrame) -> go.Figure:
+    """Distribuição de CNPJs por UF — barras horizontais."""
+    if df.empty or 'uf' not in df.columns:
+        return go.Figure()
+    ct = df['uf'].value_counts().head(15).sort_values()
+    fig = go.Figure(go.Bar(
+        x=ct.values, y=ct.index, orientation='h',
+        marker_color=ACCENT, opacity=0.85,
+        text=ct.values, textposition='outside',
+        textfont=dict(color=WHITE, size=10),
+    ))
+    return _fig(fig, height=320,
+                margin=dict(l=60, r=40, t=20, b=40),
+                xaxis_title='Qtd CNPJs',
+                yaxis_title='UF')
+
+
+def fig_score_distribuicao_novos(df: pd.DataFrame) -> go.Figure:
+    """Distribuição dos scores Núclea para CNPJs sem histórico."""
+    if df.empty:
+        return go.Figure()
+    fig = go.Figure()
+    for col, name, color in [
+        ('score_materialidade_v2', 'Score Materialidade', ACCENT),
+        ('score_quantidade_v2',    'Score Quantidade',    ACCENT2),
+    ]:
+        if col in df.columns:
+            vals = df[col].dropna()
+            fig.add_trace(go.Histogram(
+                x=vals, name=name,
+                marker_color=color, opacity=0.7,
+                nbinsx=20,
+            ))
+    fig.update_layout(barmode='overlay')
+    return _fig(fig, height=280,
+                margin=dict(l=60, r=40, t=20, b=40),
+                xaxis_title='Score (0–1000)',
+                yaxis_title='Qtd CNPJs',
+                legend=dict(orientation='h', y=1.08))

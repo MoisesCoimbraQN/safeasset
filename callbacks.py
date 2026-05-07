@@ -150,6 +150,27 @@ def register_callbacks(app):
 
     # ── Buscar dados macro quando AMBOS os stores estiverem preenchidos ───
     @app.callback(
+        Output('store-raw-cart', 'data'),
+        Output('cart-status', 'children'),
+        Input('upload-cart', 'contents'),
+        State('upload-cart', 'filename'),
+        prevent_initial_call=True,
+    )
+    def handle_upload_cart(contents, filename):
+        if not contents:
+            return None, ''
+        try:
+            df = parse_upload(contents)
+            n_cnpjs = df['id_pagador'].nunique() if 'id_pagador' in df.columns else len(df)
+            vlr = df['vlr_nominal'].sum() if 'vlr_nominal' in df.columns else 0
+            status = (f'✅ {filename} — {n_cnpjs:,} CNPJs · '
+                      f'R$ {vlr:,.0f}')
+            return df.to_json(date_format='iso', orient='split'), status
+        except Exception as e:
+            return None, f'❌ Erro: {e}'
+
+
+    @app.callback(
         Output('store-macro', 'data'),
         Input('store-raw-aux', 'data'),
         Input('store-raw-bol', 'data'),
@@ -232,7 +253,7 @@ def register_callbacks(app):
         prevent_initial_call=True,
     )
     def run_dashboard(run_clicks, run_upload_clicks, ml_clicks, fraud_clicks,
-                      aux_json_input, bol_json,
+                      aux_json_input, bol_json, cart_json,
                       cnpj_q, sel_ufs, sel_cnaes, date_from, date_to,
                       test_size, n_trees,
                       dup_thresh, emit_thresh):
@@ -292,8 +313,9 @@ def register_callbacks(app):
 
         # ── Executar pipeline ─────────────────────────────────────────────
         try:
+            df_cart = read_json(cart_json) if cart_json else None
             R = pl.run_pipeline(
-                df_aux.copy(), df_bol.copy(),
+                df_aux.copy(), df_bol.copy(), df_cart,
                 test_size          = test_size  or 0.2,
                 n_estimators       = n_trees    or 300,
                 liq_thresh         = 0.65,
@@ -399,6 +421,38 @@ def register_callbacks(app):
             print(f"[SafeAsset] Erro download: {e}")
             raise PreventUpdate
 
+    # ── CALLBACK DOWNLOAD — CNPJs sem histórico ──────────────────────────
+    @app.callback(
+        Output('download-novos', 'data'),
+        Input('btn-download-novos', 'n_clicks'),
+        State('store-raw-aux', 'data'),
+        State('store-raw-bol', 'data'),
+        prevent_initial_call=True,
+    )
+    def download_novos(n_clicks, aux_json, bol_json):
+        if not n_clicks or not aux_json or not bol_json:
+            from dash.exceptions import PreventUpdate
+            raise PreventUpdate
+        try:
+            import pipeline as pl
+            df_aux = read_json(aux_json)
+            df_bol = read_json(bol_json)
+            R = pl.run_pipeline(df_aux.copy(), df_bol.copy())
+            df = R['df_full']
+            df_exp = df[df['sem_historico'] == 1].copy() if 'sem_historico' in df.columns else df
+            cols = ['id_cnpj','uf','cd_cnae_prin','score_fidc','rating_carteira',
+                    'score_materialidade_v2','score_quantidade_v2',
+                    'sacado_indice_liquidez_1m','flag_risco_fraude']
+            cols = [c for c in cols if c in df_exp.columns]
+            df_exp = df_exp[cols].sort_values('score_fidc', ascending=False)
+            df_exp.columns = [c.replace('_',' ').title() for c in df_exp.columns]
+            return dcc.send_data_frame(df_exp.to_csv,
+                'safeasset_cnpjs_sem_historico.csv', index=False, sep=';', decimal=',')
+        except Exception as e:
+            from dash.exceptions import PreventUpdate
+            print(f"[SafeAsset] Erro download novos: {e}")
+            raise PreventUpdate
+
     # ── CALLBACK MACRO — dispara quando aba é aberta ou store muda ──────
     @app.callback(
         Output('macro-content', 'children'),
@@ -448,7 +502,9 @@ def register_callbacks(app):
 
             # Reconstruir perfil CNAE a partir da base auxiliar
             df_aux = read_json(aux_json)
-            from pipeline import calcular_perfil_cnae as _cpf
+            from pipeline import calcular_perfil_cnae
+
+
             # Criar df_full mínimo para calcular perfil CNAE
             from macro import enriquecer_perfil_com_macro, calcular_score_macro_setor, CNAE_SETOR
             import pandas as _pd
@@ -678,6 +734,14 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
     # macro vazio por padrão — preenchido pelo update_macro_content separadamente
     # Usado apenas para o semáforo setorial no Resumo (se já disponível no R)
     macro = R.get('macro') or {}
+    cob   = R.get('cobertura', {})
+
+    # df_novos — CNPJs sem histórico PCR
+    from pipeline import calcular_perfil_cnae
+    if 'sem_historico' in df_full.columns:
+        df_novos = df_full[df_full['sem_historico'] == 1].copy()
+    else:
+        df_novos = pd.DataFrame(columns=df_full.columns)
 
     # ── KPIs principais ───────────────────────────────────────────────────
     total       = len(df_full)
@@ -785,6 +849,52 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                           for nota in _notas],
                     ])] if _notas else []),
                 ], style={'marginBottom': '24px'}),
+
+                # ════════════════════════════════════════════════════════
+                # BLOCO COBERTURA — Cobertura da carteira nova
+                # ════════════════════════════════════════════════════════
+                *([card([
+                    html.Div('📊 Cobertura da Carteira',
+                             style={'fontSize': '15px', 'fontWeight': '700',
+                                    'color': WHITE, 'marginBottom': '16px',
+                                    'borderLeft': f'4px solid {ACCENT}',
+                                    'paddingLeft': '10px'}),
+                    html.Div('Quantos CNPJs da carteira têm histórico PCR e podem ser avaliados pelo modelo',
+                             style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '16px'}),
+                    dbc.Row([
+                        dbc.Col(kpi('Total na Carteira',
+                            f'{R["cobertura"]["total_cnpjs"]:,}',
+                            'CNPJs na carteira nova', ACCENT), width=2),
+                        dbc.Col(kpi('Com Histórico PCR',
+                            f'{R["cobertura"]["com_historico"]:,}',
+                            f'{R["cobertura"]["pct_com_historico"]:.1f}% — score confiável',
+                            ACCENT2), width=2),
+                        dbc.Col(kpi('Sem Histórico',
+                            f'{R["cobertura"]["sem_historico"]:,}',
+                            f'{R["cobertura"]["pct_sem_historico"]:.1f}% — primeiro contato',
+                            WARN), width=2),
+                        dbc.Col(kpi('Recomendados (A+B)',
+                            f'{R["cobertura"]["recomendados"]:,}',
+                            'dos que têm histórico', ACCENT2), width=2),
+                        dbc.Col(kpi('Atenção (C)',
+                            f'{R["cobertura"]["atencao"]:,}',
+                            'análise complementar', AMBER), width=2),
+                        dbc.Col(kpi('Não Recomendados',
+                            f'{R["cobertura"]["nao_recomendados"]:,}',
+                            'rating D ou E', WARN), width=2),
+                    ], className='g-2'),
+                    *([html.Div([
+                        html.Span('⚠️  ', style={'fontSize': '13px'}),
+                        html.Span(
+                            f'{R["cobertura"]["sem_historico"]:,} CNPJs '
+                            f'({R["cobertura"]["pct_sem_historico"]:.1f}%) não possuem histórico PCR. '
+                            'O modelo usou imputação pela mediana — análise individual obrigatória '
+                            'antes da aquisição desses títulos.',
+                            style={'fontSize': '11px', 'color': '#c8a84b',
+                                   'fontStyle': 'italic'}),
+                    ], style={'marginTop': '10px'})]
+                    if R['cobertura']['sem_historico'] > 0 else []),
+                ])] if R.get('cobertura') else []),
 
                 # ════════════════════════════════════════════════════════
                 # BLOCO 0 — Recomendação pelo Target
@@ -1278,6 +1388,201 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
               ])]),
 
             # ── CONTEXTO MACROECONÔMICO ───────────────────────────────────
+            # ── CNPJs NOVOS (sem histórico) ────────────────────────────────────
+            dcc.Tab(label='🔍 CNPJs Novos', value='tab-novos', style=tab_style,
+                    selected_style={**tab_sel, 'background': WARN, 'color': NAVY},
+              children=[html.Div(style={'padding': '24px'}, children=[
+
+                section_title('CNPJs sem Histórico PCR',
+                    'Análise específica para subsidiar decisão manual do analista'),
+
+                *([
+                    # Aviso principal
+                    html.Div([
+                        html.Span('⚠️  ', style={'fontSize': '16px'}),
+                        html.Span(
+                            f'{cob["sem_historico"]:,} CNPJs ({cob["pct_sem_historico"]:.1f}% da carteira) '
+                            'não possuem histórico PCR. A análise preditiva não é aplicável a estes CNPJs. '
+                            'Os dados abaixo subsidiam análise manual antes da decisão de aquisição.',
+                            style={'fontSize': '12px', 'color': '#c8a84b', 'fontStyle': 'italic'}),
+                    ], style={'marginBottom': '20px'}),
+
+                    # ── Bloco 1 — Visão Geral ─────────────────────────────────
+                    card([
+                        html.Div('1 — Visão Geral',
+                                 style={'fontSize': '14px', 'fontWeight': '700',
+                                        'color': WARN, 'marginBottom': '16px',
+                                        'borderLeft': f'4px solid {WARN}',
+                                        'paddingLeft': '10px'}),
+                        dbc.Row([
+                            dbc.Col(kpi('CNPJs sem Histórico',
+                                f'{cob["sem_historico"]:,}',
+                                f'{cob["pct_sem_historico"]:.1f}% da carteira',
+                                WARN), width=3),
+                            dbc.Col(kpi('Valor em Risco',
+                                f'R$ {cob["vlr_sem_historico"]:,.0f}',
+                                'valor total dos boletos desses CNPJs',
+                                WARN), width=3),
+                            dbc.Col(kpi('% do Valor Total',
+                                f'{cob["vlr_sem_historico"]/cob["vlr_total"]*100:.1f}%' if cob["vlr_total"] else '—',
+                                'participação na carteira',
+                                AMBER), width=3),
+                            dbc.Col(kpi('Com Scores Núclea',
+                                f'{int(df_novos["score_materialidade_v2"].notna().sum()):,}' if "score_materialidade_v2" in df_novos.columns else '—',
+                                'possuem indicadores PCR parciais',
+                                ACCENT2), width=3),
+                        ], className='g-3'),
+                    ]),
+
+                    # ── Bloco 2 — Perfil Cadastral ────────────────────────────
+                    card([
+                        html.Div('2 — Perfil Cadastral',
+                                 style={'fontSize': '14px', 'fontWeight': '700',
+                                        'color': ACCENT, 'marginBottom': '16px',
+                                        'borderLeft': f'4px solid {ACCENT}',
+                                        'paddingLeft': '10px'}),
+                        dbc.Row([
+                            dbc.Col([
+                                html.Div('Distribuição por Ramo de Atividade (CNAE)',
+                                         style={'fontSize': '12px', 'color': MUTED,
+                                                'marginBottom': '8px'}),
+                                G(ch.fig_cnpjs_por_cnae(
+                                    calcular_perfil_cnae(df_novos), top_n=10))
+                                if 'cd_cnae_prin' in df_novos.columns else
+                                html.Div('CNAE não disponível', style={'color': MUTED}),
+                            ], width=6),
+                            dbc.Col([
+                                html.Div('Distribuição por UF',
+                                         style={'fontSize': '12px', 'color': MUTED,
+                                                'marginBottom': '8px'}),
+                                G(ch.fig_uf_distribuicao(df_novos))
+                                if 'uf' in df_novos.columns else
+                                html.Div('UF não disponível', style={'color': MUTED}),
+                            ], width=6),
+                        ], className='g-3'),
+                    ]),
+
+                    # ── Bloco 3 — Scores Núclea (se disponíveis) ─────────────
+                    *([card([
+                        html.Div('3 — Scores Núclea (indicadores parciais)',
+                                 style={'fontSize': '14px', 'fontWeight': '700',
+                                        'color': ACCENT2, 'marginBottom': '16px',
+                                        'borderLeft': f'4px solid {ACCENT2}',
+                                        'paddingLeft': '10px'}),
+                        html.Div('Mesmo sem histórico de boletos, estes CNPJs possuem '
+                                 'indicadores PCR calculados pela Núclea.',
+                                 style={'fontSize': '11px', 'color': MUTED,
+                                        'marginBottom': '16px'}),
+                        dbc.Row([
+                            dbc.Col(kpi('Score Materialidade Médio',
+                                f'{df_novos["score_materialidade_v2"].mean():.0f}',
+                                f'Mín: {df_novos["score_materialidade_v2"].min():.0f} · '
+                                f'Máx: {df_novos["score_materialidade_v2"].max():.0f}',
+                                ACCENT2), width=3),
+                            dbc.Col(kpi('Score Quantidade Médio',
+                                f'{df_novos["score_quantidade_v2"].mean():.0f}',
+                                f'Mín: {df_novos["score_quantidade_v2"].min():.0f} · '
+                                f'Máx: {df_novos["score_quantidade_v2"].max():.0f}',
+                                ACCENT), width=3),
+                            dbc.Col(kpi('Liquidez Sacado 1m',
+                                f'{df_novos["sacado_indice_liquidez_1m"].mean():.1%}',
+                                'média dos disponíveis',
+                                ACCENT2), width=3),
+                            dbc.Col(kpi('Liquidez 3m',
+                                f'{df_novos["indicador_liquidez_quantitativo_3m"].mean():.1%}',
+                                'média dos disponíveis',
+                                ACCENT), width=3),
+                        ], className='g-3'),
+                        G(ch.fig_score_distribuicao_novos(df_novos)),
+                    ])] if 'score_materialidade_v2' in df_novos.columns and
+                           df_novos['score_materialidade_v2'].notna().any() else []),
+
+                    # ── Bloco 4 — Alertas de Fraude ───────────────────────────
+                    card([
+                        html.Div('4 — Alertas de Fraude',
+                                 style={'fontSize': '14px', 'fontWeight': '700',
+                                        'color': WARN, 'marginBottom': '16px',
+                                        'borderLeft': f'4px solid {WARN}',
+                                        'paddingLeft': '10px'}),
+                        dbc.Row([
+                            dbc.Col(kpi('Com Alerta de Fraude',
+                                f'{int(df_novos["flag_risco_fraude"].sum()):,}'
+                                if 'flag_risco_fraude' in df_novos.columns else '—',
+                                f'{df_novos["flag_risco_fraude"].mean()*100:.1f}%'
+                                if 'flag_risco_fraude' in df_novos.columns else '',
+                                WARN), width=3),
+                            dbc.Col(kpi('Boletos Duplicados',
+                                f'{int(df_novos["bol_qtd_dup_total"].sum()):,}'
+                                if 'bol_qtd_dup_total' in df_novos.columns else '—',
+                                'total de duplicatas detectadas',
+                                WARN), width=3),
+                            dbc.Col(kpi('Muitos Emitentes',
+                                f'{int((df_novos["bol_n_emitentes"] >= 10).sum()):,}'
+                                if 'bol_n_emitentes' in df_novos.columns else '—',
+                                '≥ 10 beneficiários distintos',
+                                AMBER), width=3),
+                            dbc.Col(kpi('Sem Alerta',
+                                f'{int((df_novos["flag_risco_fraude"] == 0).sum()):,}'
+                                if 'flag_risco_fraude' in df_novos.columns else '—',
+                                'sem sinais suspeitos',
+                                ACCENT2), width=3),
+                        ], className='g-3'),
+                    ]),
+
+                    # ── Bloco 5 — Contexto Macro do Setor ────────────────────
+                    *([card([
+                        html.Div('5 — Contexto Macroeconômico do Setor',
+                                 style={'fontSize': '14px', 'fontWeight': '700',
+                                        'color': ACCENT, 'marginBottom': '16px',
+                                        'borderLeft': f'4px solid {ACCENT}',
+                                        'paddingLeft': '10px'}),
+                        html.Div(
+                            f'Indicador de Risco Setorial para os CNPJs novos: '
+                            f'{R["ind_risco"]["emoji"]}  {R["ind_risco"]["tag"]} — '
+                            f'Setor {R["ind_risco"]["setor_label"]} · '
+                            f'Inadimplência atual {R["ind_risco"]["valor_atual"]:.2f}% '
+                            f'vs média histórica {R["ind_risco"]["media_24m"]:.2f}%',
+                            style={'fontSize': '12px', 'color': WHITE}),
+                        html.Div(
+                            'O risco macroeconômico do setor se aplica também aos CNPJs novos — '
+                            'contexto adicional para a decisão de aquisição.',
+                            style={'fontSize': '11px', 'color': MUTED, 'marginTop': '8px',
+                                   'fontStyle': 'italic'}),
+                    ])] if R.get('ind_risco') else []),
+
+                    # ── Download ──────────────────────────────────────────────
+                    card([
+                        html.Div('📥 Download — CNPJs para Análise Individual',
+                                 style={'fontSize': '14px', 'fontWeight': '700',
+                                        'color': WHITE, 'marginBottom': '8px',
+                                        'borderLeft': f'4px solid {WARN}',
+                                        'paddingLeft': '10px'}),
+                        html.Div(f'{cob["sem_historico"]:,} CNPJs sem histórico PCR '
+                                 '— arquivo com todos os dados disponíveis para análise manual.',
+                                 style={'fontSize': '11px', 'color': MUTED,
+                                        'marginBottom': '12px'}),
+                        dcc.Download(id='download-novos'),
+                        html.Button('⬇ Baixar CSV — CNPJs sem Histórico',
+                            id='btn-download-novos', n_clicks=0,
+                            style={'background': BLUE, 'color': WARN,
+                                   'border': f'1px solid {WARN}',
+                                   'borderRadius': '8px', 'padding': '10px 20px',
+                                   'fontWeight': '700', 'cursor': 'pointer',
+                                   'fontFamily': "'Space Grotesk',sans-serif",
+                                   'fontSize': '13px'}),
+                    ]),
+
+                ] if R.get('cobertura') and R['cobertura']['sem_historico'] > 0
+                  else [html.Div([
+                    html.Div('✅', style={'fontSize': '48px', 'marginBottom': '12px'}),
+                    html.Div('Todos os CNPJs da carteira possuem histórico PCR.',
+                             style={'fontSize': '15px', 'color': ACCENT2}),
+                    html.Div('Nenhuma análise manual adicional necessária.',
+                             style={'fontSize': '13px', 'color': MUTED, 'marginTop': '6px'}),
+                ], style={'textAlign': 'center', 'padding': '60px'})]),
+
+              ])]),
+
             dcc.Tab(label='🌐 Macro', value='tab-macro', style=tab_style,
                     selected_style={'color': NAVY, 'background': '#2563EB', 'fontWeight': '700'},
               children=[html.Div(style={'padding': '24px'}, children=[
