@@ -753,23 +753,20 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
     macro = R.get('macro') or {}
     cob   = R.get('cobertura', {})
 
-    # df_novos — CNPJs sem histórico PCR
-    from pipeline import calcular_perfil_cnae
-    if 'sem_historico' in df_full.columns:
-        df_novos = df_full[df_full['sem_historico'] == 1].copy()
-    else:
-        df_novos = pd.DataFrame(columns=df_full.columns)
-
-    # df_cart_novos — boletos da carteira nova dos CNPJs sem histórico
+    # df_cart_novos e df_novos — baseados na carteira nova vs df_full histórico
     _df_carteira = R.get('df_carteira')
-    if _df_carteira is not None and len(df_novos) > 0:
-        _novos_ids    = set(df_novos['id_cnpj'].astype(str).unique())
+    if _df_carteira is not None and len(_df_carteira) > 0:
         _col_pag      = 'id_pagador' if 'id_pagador' in _df_carteira.columns else 'id_cnpj'
+        _cnpjs_full   = set(df_full['id_cnpj'].astype(str).unique())
+        _cnpjs_cart   = set(_df_carteira[_col_pag].astype(str).unique())
+        _novos_ids    = _cnpjs_cart - _cnpjs_full
         df_cart_novos = _df_carteira[
             _df_carteira[_col_pag].astype(str).isin(_novos_ids)
         ].copy()
+        df_novos      = pd.DataFrame()
     else:
         df_cart_novos = pd.DataFrame()
+        df_novos      = pd.DataFrame()
 
     # ── KPIs principais ───────────────────────────────────────────────────
     total       = len(df_full)
@@ -1476,7 +1473,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                             dbc.Row([
                                 dbc.Col(kpi('Total de Boletos',
                                     f'{len(df_cart_novos):,}',
-                                    f'dos {len(_df_carteira) if _df_carteira is not None else 0:,} boletos da carteira',
+                                    f'dos {len(_df_carteira):,} boletos da carteira',
                                     WARN), width=3),
                                 dbc.Col(kpi('Valor Total',
                                     f'R$ {df_cart_novos["vlr_nominal"].sum():,.0f}',
