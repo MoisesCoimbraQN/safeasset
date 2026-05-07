@@ -244,6 +244,7 @@ def register_callbacks(app):
         Input('btn-run-upload',  'n_clicks'),
         Input('btn-run-ml',      'n_clicks'),
         Input('btn-run-fraud',   'n_clicks'),
+        Input('btn-run-cart',    'n_clicks'),
         Input('store-raw-aux',   'data'),
         Input('store-raw-bol',   'data'),   # dispara quando bol é carregado
         Input('flt-cnpj',        'value'),
@@ -259,7 +260,7 @@ def register_callbacks(app):
         prevent_initial_call=True,
     )
     def run_dashboard(run_clicks, run_upload_clicks, ml_clicks, fraud_clicks,
-                      aux_json_input, bol_json,
+                      cart_clicks, aux_json_input, bol_json,
                       cnpj_q, sel_ufs, sel_cnaes, date_from, date_to,
                       cart_json, test_size, n_trees,
                       dup_thresh, emit_thresh):
@@ -319,9 +320,8 @@ def register_callbacks(app):
 
         # ── Executar pipeline ─────────────────────────────────────────────
         try:
-            df_cart = read_json(cart_json) if cart_json else None
             R = pl.run_pipeline(
-                df_aux.copy(), df_bol.copy(), df_cart,
+                df_aux.copy(), df_bol.copy(),
                 test_size          = test_size  or 0.2,
                 n_estimators       = n_trees    or 300,
                 liq_thresh         = 0.65,
@@ -338,6 +338,17 @@ def register_callbacks(app):
                          style={'color': MUTED, 'fontSize': '11px', 'background': '#0d1b2a',
                                 'padding': '12px', 'borderRadius': '6px', 'overflow': 'auto'}),
             ], style={'padding': '24px'}), ''
+
+        # ── Análise da carteira nova (se disponível) ──────────────────────
+        df_cart = read_json(cart_json) if cart_json else None
+        if df_cart is not None and len(df_cart) > 0:
+            from pipeline import calcular_cobertura_carteira
+            cobertura = calcular_cobertura_carteira(R['df_full'], df_cart)
+            R['cobertura']    = cobertura
+            R['df_carteira']  = df_cart
+        else:
+            R['cobertura']   = None
+            R['df_carteira'] = None
 
         # ── Calcular Indicador de Risco Setorial ──────────────────────────
         try:
@@ -1465,7 +1476,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                             dbc.Row([
                                 dbc.Col(kpi('Total de Boletos',
                                     f'{len(df_cart_novos):,}',
-                                    f'dos {len(_df_carteira):,} boletos da carteira',
+                                    f'dos {len(_df_carteira) if _df_carteira is not None else 0:,} boletos da carteira',
                                     WARN), width=3),
                                 dbc.Col(kpi('Valor Total',
                                     f'R$ {df_cart_novos["vlr_nominal"].sum():,.0f}',

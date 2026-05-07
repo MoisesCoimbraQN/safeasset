@@ -559,13 +559,12 @@ def calcular_cobertura_carteira(df_full: pd.DataFrame,
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
-                 df_carteira: pd.DataFrame = None,
                  test_size: float = 0.2, n_estimators: int = 300,
                  liq_thresh: float = 0.65, mat_thresh: float = 800,
                  pct_dup_thresh: float = FRAUDE_PCT_DUP_THRESH,
                  n_emitentes_thresh: int = FRAUDE_N_EMITENTES_THRESH) -> dict:
-    # df_carteira: boletos da nova carteira a ser adquirida (sem vlr_baixa)
-    # Se None, usa df_bol como proxy para demonstração
+    """Pipeline histórico — roda sempre com base auxiliar + boletos históricos.
+    A análise da carteira nova é feita separadamente no dashboard.""" 
     result = {}
 
     # Passo 2B — detecção de fraude
@@ -591,19 +590,9 @@ def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
     feat_bol['bol_pct_duplicado'] = feat_bol['bol_pct_duplicado'].fillna(0)
     feat_bol['bol_n_emitentes']   = feat_bol['bol_n_emitentes'].fillna(0)
 
-    # Âncora do merge: carteira nova (se disponível) ou base auxiliar
-    # CNPJs da carteira não cadastrados em nenhuma base entram com NaN
-    if df_carteira is not None and len(df_carteira) > 0:
-        col_pag = 'id_pagador' if 'id_pagador' in df_carteira.columns else 'id_cnpj'
-        cnpjs_cart = pd.DataFrame(
-            {'id_cnpj': df_carteira[col_pag].astype(str).unique()}
-        )
-        base    = cnpjs_cart.merge(df_aux, on='id_cnpj', how='left')
-        df_full = base.merge(feat_bol, on='id_cnpj', how='left')
-        print(f"[SafeAsset] Merge âncora carteira — {len(df_full):,} CNPJs únicos")
-    else:
-        df_full = df_aux.merge(feat_bol, on='id_cnpj', how='left')
-        print(f"[SafeAsset] Merge âncora auxiliar — {len(df_full):,} CNPJs")
+    # Merge sempre com âncora na base auxiliar (histórico completo)
+    df_full = df_aux.merge(feat_bol, on='id_cnpj', how='left')
+    print(f"[SafeAsset] Merge histórico — {len(df_full):,} CNPJs")
 
     # Flag sem_historico — NaN em bol_qtd_total = sem boletos históricos na PCR
     bol_features = ['bol_qtd_total', 'bol_pct_atrasado', 'bol_taxa_recuperacao']
@@ -645,12 +634,6 @@ def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
     perfil_cnae = calcular_perfil_cnae(df_full)
     result['perfil_cnae'] = perfil_cnae
 
-    # Salvar df_carteira no result para uso no dashboard
-    result['df_carteira'] = df_carteira
 
-    # ── Cobertura da carteira nova ────────────────────────────────────────
-    df_cart = df_carteira if df_carteira is not None else df_bol
-    cobertura = calcular_cobertura_carteira(df_full, df_cart)
-    result['cobertura'] = cobertura
 
     return result
