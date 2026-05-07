@@ -749,6 +749,17 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
     else:
         df_novos = pd.DataFrame(columns=df_full.columns)
 
+    # df_cart_novos — boletos da carteira nova dos CNPJs sem histórico
+    _df_carteira = R.get('df_carteira')
+    if _df_carteira is not None and len(df_novos) > 0:
+        _novos_ids    = set(df_novos['id_cnpj'].astype(str).unique())
+        _col_pag      = 'id_pagador' if 'id_pagador' in _df_carteira.columns else 'id_cnpj'
+        df_cart_novos = _df_carteira[
+            _df_carteira[_col_pag].astype(str).isin(_novos_ids)
+        ].copy()
+    else:
+        df_cart_novos = pd.DataFrame()
+
     # ── KPIs principais ───────────────────────────────────────────────────
     total       = len(df_full)
     rating_ct   = df_full['rating_carteira'].value_counts()
