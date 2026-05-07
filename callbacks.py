@@ -1465,7 +1465,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                             dbc.Row([
                                 dbc.Col(kpi('Total de Boletos',
                                     f'{len(df_cart_novos):,}',
-                                    f'dos {len(df_cart):,} boletos da carteira',
+                                    f'dos {len(_df_carteira):,} boletos da carteira',
                                     WARN), width=3),
                                 dbc.Col(kpi('Valor Total',
                                     f'R$ {df_cart_novos["vlr_nominal"].sum():,.0f}',
