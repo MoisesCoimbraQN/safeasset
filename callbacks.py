@@ -160,7 +160,7 @@ def register_callbacks(app):
         if not contents:
             return None, ''
         try:
-            df = parse_upload(contents)
+            df = parse_upload(contents, filename)
             n_cnpjs = df['id_pagador'].nunique() if 'id_pagador' in df.columns else len(df)
             vlr = df['vlr_nominal'].sum() if 'vlr_nominal' in df.columns else 0
             status = (f'✅ {filename} — {n_cnpjs:,} CNPJs · '
