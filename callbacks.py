@@ -160,12 +160,15 @@ def register_callbacks(app):
         if not contents:
             return None, ''
         try:
-            df = parse_upload(contents, filename)
+            json_str = parse_upload(contents, filename)
+            if not json_str:
+                return None, '❌ Erro ao ler arquivo'
+            df = read_json(json_str)
             n_cnpjs = df['id_pagador'].nunique() if 'id_pagador' in df.columns else len(df)
             vlr = df['vlr_nominal'].sum() if 'vlr_nominal' in df.columns else 0
             status = (f'✅ {filename} — {n_cnpjs:,} CNPJs · '
                       f'R$ {vlr:,.0f}')
-            return df.to_json(date_format='iso', orient='split'), status
+            return json_str, status
         except Exception as e:
             return None, f'❌ Erro: {e}'
 
