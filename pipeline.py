@@ -591,19 +591,30 @@ def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
     feat_bol['bol_pct_duplicado'] = feat_bol['bol_pct_duplicado'].fillna(0)
     feat_bol['bol_n_emitentes']   = feat_bol['bol_n_emitentes'].fillna(0)
 
-    df_full = df_aux.merge(feat_bol, on='id_cnpj', how='left')
+    # Âncora do merge: carteira nova (se disponível) ou base auxiliar
+    # CNPJs da carteira não cadastrados em nenhuma base entram com NaN
+    if df_carteira is not None and len(df_carteira) > 0:
+        col_pag = 'id_pagador' if 'id_pagador' in df_carteira.columns else 'id_cnpj'
+        cnpjs_cart = pd.DataFrame(
+            {'id_cnpj': df_carteira[col_pag].astype(str).unique()}
+        )
+        base    = cnpjs_cart.merge(df_aux, on='id_cnpj', how='left')
+        df_full = base.merge(feat_bol, on='id_cnpj', how='left')
+        print(f"[SafeAsset] Merge âncora carteira — {len(df_full):,} CNPJs únicos")
+    else:
+        df_full = df_aux.merge(feat_bol, on='id_cnpj', how='left')
+        print(f"[SafeAsset] Merge âncora auxiliar — {len(df_full):,} CNPJs")
 
-    # Flag de sacados sem histórico de boletos na PCR
+    # Flag sem_historico — NaN em bol_qtd_total = sem boletos históricos na PCR
     bol_features = ['bol_qtd_total', 'bol_pct_atrasado', 'bol_taxa_recuperacao']
     bol_disp = [f for f in bol_features if f in df_full.columns]
-    if bol_disp:
-        df_full['sem_historico'] = df_full[bol_disp[0]].isna().astype(int)
-    else:
-        df_full['sem_historico'] = 0
-    n_sem = int(df_full['sem_historico'].sum())
+    df_full['sem_historico'] = (
+        df_full[bol_disp[0]].isna().astype(int) if bol_disp else 0
+    )
+    n_sem   = int(df_full['sem_historico'].sum())
     pct_sem = df_full['sem_historico'].mean() * 100
-    print(f"[SafeAsset] Histórico — com histórico: {len(df_full)-n_sem:,} "
-          f"({100-pct_sem:.1f}%)  sem histórico: {n_sem:,} ({pct_sem:.1f}%)")
+    print(f"[SafeAsset] Histórico — com: {len(df_full)-n_sem:,} ({100-pct_sem:.1f}%) "
+          f"  sem: {n_sem:,} ({pct_sem:.1f}%)")
 
     # Passo 5 — target baseado em adimplência real dos boletos
     df_full, p75       = definir_target(df_full, df_bol_marcado, liq_thresh, mat_thresh)
