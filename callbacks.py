@@ -241,12 +241,12 @@ def register_callbacks(app):
         Input('btn-run-fraud',   'n_clicks'),
         Input('store-raw-aux',   'data'),
         Input('store-raw-bol',   'data'),   # dispara quando bol é carregado
+        Input('store-raw-cart',  'data'),   # dispara quando carteira é carregada
         Input('flt-cnpj',        'value'),
         Input('flt-uf',          'value'),
         Input('flt-cnae',        'value'),
         Input('flt-date',        'start_date'),
         Input('flt-date',        'end_date'),
-        State('store-raw-cart',  'data'),
         State('sl-test',  'value'),
         State('sl-trees', 'value'),
         State('sl-dup-thresh',  'value'),
@@ -254,9 +254,9 @@ def register_callbacks(app):
         prevent_initial_call=True,
     )
     def run_dashboard(run_clicks, run_upload_clicks, ml_clicks, fraud_clicks,
-                      aux_json_input, bol_json,
+                      aux_json_input, bol_json, cart_json,
                       cnpj_q, sel_ufs, sel_cnaes, date_from, date_to,
-                      cart_json, test_size, n_trees,
+                      test_size, n_trees,
                       dup_thresh, emit_thresh):
 
         from dash.exceptions import PreventUpdate

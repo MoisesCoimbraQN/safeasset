@@ -329,6 +329,7 @@ def create_layout():
         children=[
             dcc.Store(id='store-raw-aux'),
             dcc.Store(id='store-raw-bol'),
+            dcc.Store(id='store-raw-cart'),
             dcc.Store(id='store-macro'),
             dcc.Store(id='store-sidebar', data='open'),
 
