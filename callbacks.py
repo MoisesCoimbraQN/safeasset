@@ -266,10 +266,15 @@ def register_callbacks(app):
                       dup_thresh, emit_thresh):
 
         from dash.exceptions import PreventUpdate
+        from dash import ctx
 
         # Aguardar ambos os arquivos — mas não bloquear se um já estava no store
         if not aux_json_input and not bol_json:
             raise PreventUpdate
+
+        # Se disparou pelo btn-run-cart mas pipeline ainda não rodou — prevenir
+        triggered = ctx.triggered_id if ctx.triggered_id else ''
+        cart_only = triggered == 'btn-run-cart'
 
         if not aux_json_input:
             return html.Div([
@@ -360,7 +365,9 @@ def register_callbacks(app):
             R['ind_risco'] = None
 
         # ── Montar dashboard ──────────────────────────────────────────────
-        dashboard = build_dashboard(R, 0.65, 800)
+        dashboard = build_dashboard(R, 0.65, 800,
+                                     dup_thresh  or 0.05,
+                                     emit_thresh or 10)
         return dashboard, ''
 
     # ── Filtros do ranking ─────────────────────────────────────────────────
@@ -731,7 +738,8 @@ def register_callbacks(app):
 # MONTAGEM DO DASHBOARD (chamado dentro do callback principal)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
+def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
+                    dup_thresh: float = 0.05, emit_thresh: int = 10):
     """
     Monta todo o conteúdo do dashboard a partir dos resultados do pipeline.
     Usa charts.py para gerar os gráficos e layout.py para os componentes visuais.
