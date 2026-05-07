@@ -160,16 +160,18 @@ def register_callbacks(app):
         if not contents:
             return None, ''
         try:
+            print(f'[SafeAsset] Upload carteira nova: {filename}')
             json_str = parse_upload(contents, filename)
             if not json_str:
                 return None, '❌ Erro ao ler arquivo'
             df = read_json(json_str)
             n_cnpjs = df['id_pagador'].nunique() if 'id_pagador' in df.columns else len(df)
             vlr = df['vlr_nominal'].sum() if 'vlr_nominal' in df.columns else 0
-            status = (f'✅ {filename} — {n_cnpjs:,} CNPJs · '
-                      f'R$ {vlr:,.0f}')
+            status = (f'✅ {filename} — {n_cnpjs:,} CNPJs · R$ {vlr:,.0f}')
+            print(f'[SafeAsset] Carteira OK — {n_cnpjs:,} CNPJs · R$ {vlr:,.0f}')
             return json_str, status
         except Exception as e:
+            print(f'[SafeAsset] Erro carteira: {e}')
             return None, f'❌ Erro: {e}'
 
 
@@ -244,12 +246,12 @@ def register_callbacks(app):
         Input('btn-run-fraud',   'n_clicks'),
         Input('store-raw-aux',   'data'),
         Input('store-raw-bol',   'data'),   # dispara quando bol é carregado
-        Input('store-raw-cart',  'data'),   # dispara quando carteira é carregada
         Input('flt-cnpj',        'value'),
         Input('flt-uf',          'value'),
         Input('flt-cnae',        'value'),
         Input('flt-date',        'start_date'),
         Input('flt-date',        'end_date'),
+        State('store-raw-cart',  'data'),
         State('sl-test',  'value'),
         State('sl-trees', 'value'),
         State('sl-dup-thresh',  'value'),
@@ -257,9 +259,9 @@ def register_callbacks(app):
         prevent_initial_call=True,
     )
     def run_dashboard(run_clicks, run_upload_clicks, ml_clicks, fraud_clicks,
-                      aux_json_input, bol_json, cart_json,
+                      aux_json_input, bol_json,
                       cnpj_q, sel_ufs, sel_cnaes, date_from, date_to,
-                      test_size, n_trees,
+                      cart_json, test_size, n_trees,
                       dup_thresh, emit_thresh):
 
         from dash.exceptions import PreventUpdate
@@ -1438,68 +1440,83 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                         ], className='g-3'),
                     ]),
 
-                    # ── Bloco 2 — Perfil Cadastral ────────────────────────────
-                    card([
-                        html.Div('2 — Perfil Cadastral',
+                    # ── Bloco 2 — Perfil da Carteira Nova ────────────────
+                    *([card([
+                        html.Div('2 — Perfil dos Boletos da Carteira Nova',
                                  style={'fontSize': '14px', 'fontWeight': '700',
                                         'color': ACCENT, 'marginBottom': '16px',
                                         'borderLeft': f'4px solid {ACCENT}',
                                         'paddingLeft': '10px'}),
-                        dbc.Row([
-                            dbc.Col([
-                                html.Div('Distribuição por Ramo de Atividade (CNAE)',
-                                         style={'fontSize': '12px', 'color': MUTED,
-                                                'marginBottom': '8px'}),
-                                G(ch.fig_cnpjs_por_cnae(
-                                    calcular_perfil_cnae(df_novos), top_n=10))
-                                if 'cd_cnae_prin' in df_novos.columns else
-                                html.Div('CNAE não disponível', style={'color': MUTED}),
-                            ], width=6),
-                            dbc.Col([
-                                html.Div('Distribuição por UF',
-                                         style={'fontSize': '12px', 'color': MUTED,
-                                                'marginBottom': '8px'}),
-                                G(ch.fig_uf_distribuicao(df_novos))
-                                if 'uf' in df_novos.columns else
-                                html.Div('UF não disponível', style={'color': MUTED}),
-                            ], width=6),
-                        ], className='g-3'),
-                    ]),
-
-                    # ── Bloco 3 — Scores Núclea (se disponíveis) ─────────────
-                    *([card([
-                        html.Div('3 — Scores Núclea (indicadores parciais)',
-                                 style={'fontSize': '14px', 'fontWeight': '700',
-                                        'color': ACCENT2, 'marginBottom': '16px',
-                                        'borderLeft': f'4px solid {ACCENT2}',
-                                        'paddingLeft': '10px'}),
-                        html.Div('Mesmo sem histórico de boletos, estes CNPJs possuem '
-                                 'indicadores PCR calculados pela Núclea.',
+                        html.Div('Características dos boletos a pagar dos CNPJs sem histórico PCR',
                                  style={'fontSize': '11px', 'color': MUTED,
                                         'marginBottom': '16px'}),
-                        dbc.Row([
-                            dbc.Col(kpi('Score Materialidade Médio',
-                                f'{df_novos["score_materialidade_v2"].mean():.0f}',
-                                f'Mín: {df_novos["score_materialidade_v2"].min():.0f} · '
-                                f'Máx: {df_novos["score_materialidade_v2"].max():.0f}',
-                                ACCENT2), width=3),
-                            dbc.Col(kpi('Score Quantidade Médio',
-                                f'{df_novos["score_quantidade_v2"].mean():.0f}',
-                                f'Mín: {df_novos["score_quantidade_v2"].min():.0f} · '
-                                f'Máx: {df_novos["score_quantidade_v2"].max():.0f}',
-                                ACCENT), width=3),
-                            dbc.Col(kpi('Liquidez Sacado 1m',
-                                f'{df_novos["sacado_indice_liquidez_1m"].mean():.1%}',
-                                'média dos disponíveis',
-                                ACCENT2), width=3),
-                            dbc.Col(kpi('Liquidez 3m',
-                                f'{df_novos["indicador_liquidez_quantitativo_3m"].mean():.1%}',
-                                'média dos disponíveis',
-                                ACCENT), width=3),
-                        ], className='g-3'),
-                        G(ch.fig_score_distribuicao_novos(df_novos)),
-                    ])] if 'score_materialidade_v2' in df_novos.columns and
-                           df_novos['score_materialidade_v2'].notna().any() else []),
+                        *([
+                            dbc.Row([
+                                dbc.Col(kpi('Total de Boletos',
+                                    f'{len(df_cart_novos):,}',
+                                    f'dos {len(df_cart):,} boletos da carteira',
+                                    WARN), width=3),
+                                dbc.Col(kpi('Valor Total',
+                                    f'R$ {df_cart_novos["vlr_nominal"].sum():,.0f}',
+                                    f'Ticket médio: R$ {df_cart_novos["vlr_nominal"].mean():,.0f}',
+                                    WARN), width=3),
+                                dbc.Col(kpi('Beneficiários Distintos',
+                                    f'{df_cart_novos["id_beneficiario"].nunique():,}',
+                                    'cedentes distintos na carteira',
+                                    ACCENT), width=3),
+                                dbc.Col(kpi('CNPJs Pagadores',
+                                    f'{df_cart_novos["id_pagador"].nunique():,}',
+                                    'sem histórico PCR',
+                                    WARN), width=3),
+                            ], className='g-3'),
+                            html.Hr(style={'borderColor': BORDER, 'margin': '16px 0'}),
+                            dbc.Row([
+                                dbc.Col([
+                                    html.Div('Emissão — intervalo dos boletos',
+                                             style={'fontSize': '11px', 'color': MUTED,
+                                                    'marginBottom': '6px'}),
+                                    html.Div([
+                                        html.Span('De ', style={'color': MUTED, 'fontSize': '12px'}),
+                                        html.Span(
+                                            str(df_cart_novos['dt_emissao'].min())[:10],
+                                            style={'color': WHITE, 'fontWeight': '700',
+                                                   'fontSize': '13px'}),
+                                        html.Span('  até  ', style={'color': MUTED,
+                                                                    'fontSize': '12px'}),
+                                        html.Span(
+                                            str(df_cart_novos['dt_emissao'].max())[:10],
+                                            style={'color': WHITE, 'fontWeight': '700',
+                                                   'fontSize': '13px'}),
+                                    ]),
+                                ], width=6),
+                                dbc.Col([
+                                    html.Div('Vencimento — intervalo dos boletos',
+                                             style={'fontSize': '11px', 'color': MUTED,
+                                                    'marginBottom': '6px'}),
+                                    html.Div([
+                                        html.Span('De ', style={'color': MUTED, 'fontSize': '12px'}),
+                                        html.Span(
+                                            str(df_cart_novos['dt_vencimento'].min())[:10],
+                                            style={'color': AMBER, 'fontWeight': '700',
+                                                   'fontSize': '13px'}),
+                                        html.Span('  até  ', style={'color': MUTED,
+                                                                    'fontSize': '12px'}),
+                                        html.Span(
+                                            str(df_cart_novos['dt_vencimento'].max())[:10],
+                                            style={'color': AMBER, 'fontWeight': '700',
+                                                   'fontSize': '13px'}),
+                                    ]),
+                                ], width=6),
+                            ], className='g-3'),
+                            html.Hr(style={'borderColor': BORDER, 'margin': '16px 0'}),
+                            html.Div('Distribuição por Valor dos Boletos',
+                                     style={'fontSize': '11px', 'color': MUTED,
+                                            'marginBottom': '8px'}),
+                            G(ch.fig_vlr_distribuicao_novos(df_cart_novos)),
+                        ] if df_cart_novos is not None and len(df_cart_novos) > 0
+                        else [html.Div('Dados da carteira não disponíveis.',
+                                       style={'color': MUTED, 'fontSize': '12px'})]),
+                    ]),] if True else []),
 
                     # ── Bloco 4 — Alertas de Fraude ───────────────────────────
                     card([

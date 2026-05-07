@@ -645,6 +645,9 @@ def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
     perfil_cnae = calcular_perfil_cnae(df_full)
     result['perfil_cnae'] = perfil_cnae
 
+    # Salvar df_carteira no result para uso no dashboard
+    result['df_carteira'] = df_carteira
+
     # ── Cobertura da carteira nova ────────────────────────────────────────
     df_cart = df_carteira if df_carteira is not None else df_bol
     cobertura = calcular_cobertura_carteira(df_full, df_cart)

@@ -836,3 +836,26 @@ def fig_score_distribuicao_novos(df: pd.DataFrame) -> go.Figure:
                 xaxis_title='Score (0–1000)',
                 yaxis_title='Qtd CNPJs',
                 legend=dict(orientation='h', y=1.08))
+
+
+def fig_vlr_distribuicao_novos(df: pd.DataFrame) -> go.Figure:
+    """Histograma de distribuição de valores dos boletos dos CNPJs novos."""
+    if df is None or df.empty or 'vlr_nominal' not in df.columns:
+        return go.Figure()
+    fig = go.Figure(go.Histogram(
+        x=df['vlr_nominal'],
+        nbinsx=20,
+        marker_color=WARN,
+        opacity=0.85,
+        name='Valor Nominal (R$)',
+    ))
+    fig.add_vline(
+        x=df['vlr_nominal'].mean(),
+        line_dash='dash', line_color=AMBER, line_width=1.5,
+        annotation_text=f'Média: R$ {df["vlr_nominal"].mean():,.0f}',
+        annotation_font_color=AMBER,
+    )
+    return _fig(fig, height=240,
+                margin=dict(l=60, r=40, t=20, b=50),
+                xaxis_title='Valor Nominal (R$)',
+                yaxis_title='Qtd Boletos')
