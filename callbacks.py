@@ -764,6 +764,20 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
             _df_carteira[_col_pag].astype(str).isin(_novos_ids)
         ].copy()
         df_novos      = pd.DataFrame()
+        # Detecção de fraude na carteira nova
+        if df_cart_novos is not None and len(df_cart_novos) > 0:
+            from pipeline import detectar_duplicatas as _det_dup
+            _fr_cart      = _det_dup(
+                df_cart_novos,
+                pct_dup_thresh     = dup_thresh  or 0.05,
+                n_emitentes_thresh = emit_thresh or 10,
+            )
+            _fr_stats = _fr_cart['stats']
+            _fr_cnpj  = _fr_cart['fraude_por_cnpj']
+        else:
+            _fr_stats = {'total_duplicatas':0,'cnpjs_suspeitos':0,
+                         'total_cnpjs_com_boleto':0,'total_boletos':0}
+            _fr_cnpj  = pd.DataFrame()
     else:
         df_cart_novos = pd.DataFrame()
         df_novos      = pd.DataFrame()
@@ -1537,36 +1551,45 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float):
                                        style={'color': MUTED, 'fontSize': '12px'})]),
                     ]),] if True else []),
 
-                    # ── Bloco 4 — Alertas de Fraude ───────────────────────────
+                    # ── Bloco 4 — Alertas de Fraude (carteira nova) ──────────
                     card([
-                        html.Div('4 — Alertas de Fraude',
+                        html.Div('4 — Alertas de Fraude nos Boletos da Carteira',
                                  style={'fontSize': '14px', 'fontWeight': '700',
                                         'color': WARN, 'marginBottom': '16px',
                                         'borderLeft': f'4px solid {WARN}',
                                         'paddingLeft': '10px'}),
+                        html.Div('Verificação de duplicatas e padrões suspeitos '
+                                 'nos boletos da carteira nova',
+                                 style={'fontSize': '11px', 'color': MUTED,
+                                        'marginBottom': '16px'}),
                         dbc.Row([
-                            dbc.Col(kpi('Com Alerta de Fraude',
-                                f'{int(df_novos["flag_risco_fraude"].sum()):,}'
-                                if 'flag_risco_fraude' in df_novos.columns else '—',
-                                f'{df_novos["flag_risco_fraude"].mean()*100:.1f}%'
-                                if 'flag_risco_fraude' in df_novos.columns else '',
-                                WARN), width=3),
+                            dbc.Col(kpi('Total Boletos',
+                                f'{_fr_stats["total_boletos"]:,}',
+                                'boletos analisados na carteira',
+                                ACCENT), width=3),
                             dbc.Col(kpi('Boletos Duplicados',
-                                f'{int(df_novos["bol_qtd_dup_total"].sum()):,}'
-                                if 'bol_qtd_dup_total' in df_novos.columns else '—',
-                                'total de duplicatas detectadas',
-                                WARN), width=3),
-                            dbc.Col(kpi('Muitos Emitentes',
-                                f'{int((df_novos["bol_n_emitentes"] >= 10).sum()):,}'
-                                if 'bol_n_emitentes' in df_novos.columns else '—',
-                                '≥ 10 beneficiários distintos',
-                                AMBER), width=3),
-                            dbc.Col(kpi('Sem Alerta',
-                                f'{int((df_novos["flag_risco_fraude"] == 0).sum()):,}'
-                                if 'flag_risco_fraude' in df_novos.columns else '—',
+                                f'{_fr_stats["total_duplicatas"]:,}',
+                                f'{_fr_stats["total_duplicatas"]/_fr_stats["total_boletos"]*100:.1f}% do total'
+                                if _fr_stats["total_boletos"] > 0 else '0%',
+                                WARN if _fr_stats["total_duplicatas"] > 0 else ACCENT2), width=3),
+                            dbc.Col(kpi('CNPJs com Alerta',
+                                f'{_fr_stats["cnpjs_suspeitos"]:,}',
+                                f'de {_fr_stats["total_cnpjs_com_boleto"]:,} CNPJs analisados',
+                                WARN if _fr_stats["cnpjs_suspeitos"] > 0 else ACCENT2), width=3),
+                            dbc.Col(kpi('CNPJs sem Alerta',
+                                f'{_fr_stats["total_cnpjs_com_boleto"] - _fr_stats["cnpjs_suspeitos"]:,}',
                                 'sem sinais suspeitos',
                                 ACCENT2), width=3),
                         ], className='g-3'),
+                        *([html.Div(
+                            f'⚠️  {_fr_stats["cnpjs_suspeitos"]} CNPJs com padrões suspeitos '
+                            f'detectados nos {_fr_stats["total_boletos"]} boletos da carteira nova.',
+                            style={'fontSize': '11px', 'color': '#c8a84b',
+                                   'fontStyle': 'italic', 'marginTop': '10px'})]
+                        if _fr_stats["cnpjs_suspeitos"] > 0 else
+                        [html.Div('✅ Nenhum padrão suspeito detectado nos boletos da carteira.',
+                            style={'fontSize': '11px', 'color': ACCENT2,
+                                   'marginTop': '10px'})]),
                     ]),
 
                     # ── Bloco 5 — Contexto Macro do Setor ────────────────────
