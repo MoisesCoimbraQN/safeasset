@@ -292,52 +292,51 @@ def calcular_score_macro_setor(indicadores: dict, setor: str) -> dict:
     ] else 'inadimplencia_pj_total'
     inad_val = ind.get(inad_chave, ind.get('inadimplencia_pj_total', 4.0))
     inad_ref = _INAD_REF.get(setor, _INAD_REF_DEFAULT)
-    # Normaliza: inad=0% → 100pts; inad=10% → 0pts
-    comp_inad = max(0, min(100, 100 - (inad_val / 10.0) * 100))
 
-    # ── Componente 2: PIB anual ───────────────────────────────────
-    pib_anual = ind.get('pib_variacao_anual', 2.0)
-    # PIB -4% → 0pts; PIB +6% → 100pts
-    comp_pib = max(0, min(100, (pib_anual + 4.0) / 10.0 * 100))
-
-    # ── Componente 3: SELIC ───────────────────────────────────────
-    selic = ind.get('selic_meta', 10.75)
-    # SELIC 2% → 100pts; SELIC 15%+ → 0pts
+    # Fórmula: 3 componentes BCB — inadimplência(50%) + SELIC(30%) + IPCA(20%)
+    comp_inad  = max(0, min(100, 100 - (inad_val / 10.0) * 100))
+    selic      = ind.get('selic_meta', 10.75)
     comp_selic = max(0, min(100, 100 - ((selic - 2.0) / 13.0) * 100))
+    ipca       = ind.get('ipca_acumulado_12m', 4.5)
+    comp_ipca  = max(0, min(100, 100 - (ipca / 12.0) * 100))
+    # Manter para compatibilidade com o retorno
+    pib_anual  = ind.get('pib_variacao_anual', 2.0)
+    comp_pib   = max(0, min(100, (pib_anual + 4.0) / 10.0 * 100))
+    comp_setor = comp_pib  # fallback
 
-    # ── Componente 4: IPCA ────────────────────────────────────────
-    ipca = ind.get('ipca_acumulado_12m', 4.5)
-    # IPCA 0% → 100pts; IPCA 12%+ → 0pts
-    comp_ipca = max(0, min(100, 100 - (ipca / 12.0) * 100))
+    score = comp_inad * 0.50 + comp_selic * 0.30 + comp_ipca * 0.20
 
-    # ── Componente 5: Indicador setorial específico ───────────────
-    if setor == 'comercio':
-        var_set = ind.get('pmc_variacao', 1.0)
-    elif setor in ('servicos', 'alojamento', 'info_ti', 'financeiro', 'saude', 'educacao'):
-        var_set = ind.get('pms_variacao', 1.5)
+    # Faixas por quartis históricos P25/P75
+    try:
+        import numpy as _np
+        _dfs = [
+            _bcb_serie_historico(SERIES_BCB.get(inad_chave, 21082), n=24),
+            _bcb_serie_historico(432,   n=24),
+            _bcb_serie_historico(13522, n=24),
+        ]
+        _n = min(len(d) for d in _dfs)
+        if _n >= 8:
+            _sh = []
+            for _i in range(_n):
+                _ci = max(0, min(100, 100-(float(_dfs[0]['valor'].iloc[_i])/10)*100))
+                _cs = max(0, min(100, 100-((float(_dfs[1]['valor'].iloc[_i])-2)/13)*100))
+                _cp = max(0, min(100, 100-(float(_dfs[2]['valor'].iloc[_i])/12)*100))
+                _sh.append(_ci*0.50 + _cs*0.30 + _cp*0.20)
+            p25 = float(_np.percentile(_sh, 25))
+            p75 = float(_np.percentile(_sh, 75))
+        else:
+            p25, p75 = 45.0, 65.0
+    except Exception:
+        p25, p75 = 45.0, 65.0
+
+    if score >= p75:
+        nivel, cor = "Favorável",    "#00cc70"
+    elif score >= p25:
+        nivel, cor = "Neutro",       "#F59E0B"
+    elif score >= p25 * 0.7:
+        nivel, cor = "Atenção",      "#ff6b35"
     else:
-        var_set = pib_anual
-    # var -5% → 0pts; var +5% → 100pts
-    comp_setor = max(0, min(100, (var_set + 5.0) / 10.0 * 100))
-
-    # ── Score final ponderado ─────────────────────────────────────
-    score = (
-        comp_inad  * 0.40 +
-        comp_pib   * 0.25 +
-        comp_selic * 0.15 +
-        comp_ipca  * 0.10 +
-        comp_setor * 0.10
-    )
-
-    # Classificação qualitativa
-    if score >= 75:
-        nivel, cor = "Favorável",   "#00cc70"
-    elif score >= 55:
-        nivel, cor = "Neutro",      "#F59E0B"
-    elif score >= 35:
-        nivel, cor = "Atenção",     "#ff6b35"
-    else:
-        nivel, cor = "Desfavorável","#EF4444"
+        nivel, cor = "Desfavorável", "#EF4444"
 
     return {
         'score':           round(score, 1),

@@ -460,20 +460,21 @@ def calcular_score_final(df_full: pd.DataFrame) -> pd.DataFrame:
     atraso_norm = (df['media_atraso_dias'].fillna(atraso_max) / atraso_max).clip(0, 1)
     inad_norm   = df['share_vl_inad_pag_bol_6_a_15d'].fillna(0).clip(0, 1)
 
+    # Fórmula: sacado_liquidez(40%) + materialidade(25%) + quantidade(15%)
+    #           + atraso_inv(12%) + inadimp_inv(8%)
+    # Removido: indicador_liquidez_quantitativo_3m (perspectiva do cedente, não pagador)
     c_liquidez   = df['sacado_indice_liquidez_1m'].fillna(0).clip(0, 1)
     c_mat        = (df['score_materialidade_v2'].fillna(0) / 1000).clip(0, 1)
     c_qtd        = (df['score_quantidade_v2'].fillna(0) / 1000).clip(0, 1)
-    c_liq3m      = df['indicador_liquidez_quantitativo_3m'].fillna(0).clip(0, 1)
     c_atraso_inv = (1 - atraso_norm)
     c_inad_inv   = (1 - inad_norm)
 
     score_raw = (
-        c_liquidez   * 0.35 +
+        c_liquidez   * 0.40 +
         c_mat        * 0.25 +
         c_qtd        * 0.15 +
-        c_liq3m      * 0.10 +
-        c_atraso_inv * 0.08 +
-        c_inad_inv   * 0.07
+        c_atraso_inv * 0.12 +
+        c_inad_inv   * 0.08
     )
 
     df['score_fidc'] = (score_raw * 1000).round(0).astype(int).clip(0, 1000)
@@ -559,7 +560,7 @@ def calcular_cobertura_carteira(df_full: pd.DataFrame,
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
-                 test_size: float = 0.2, n_estimators: int = 300,
+                 test_size: float = 0.2, n_estimators: int = 100,
                  liq_thresh: float = 0.65, mat_thresh: float = 800,
                  pct_dup_thresh: float = FRAUDE_PCT_DUP_THRESH,
                  n_emitentes_thresh: int = FRAUDE_N_EMITENTES_THRESH) -> dict:

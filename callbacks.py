@@ -245,13 +245,13 @@ def register_callbacks(app):
         Input('btn-run-ml',      'n_clicks'),
         Input('btn-run-fraud',   'n_clicks'),
         Input('btn-run-cart',    'n_clicks'),
-        Input('store-raw-aux',   'data'),
-        Input('store-raw-bol',   'data'),   # dispara quando bol é carregado
         Input('flt-cnpj',        'value'),
         Input('flt-uf',          'value'),
         Input('flt-cnae',        'value'),
         Input('flt-date',        'start_date'),
         Input('flt-date',        'end_date'),
+        State('store-raw-aux',   'data'),
+        State('store-raw-bol',   'data'),
         State('store-raw-cart',  'data'),
         State('sl-test',  'value'),
         State('sl-trees', 'value'),
@@ -260,10 +260,10 @@ def register_callbacks(app):
         prevent_initial_call=True,
     )
     def run_dashboard(run_clicks, run_upload_clicks, ml_clicks, fraud_clicks,
-                      cart_clicks, aux_json_input, bol_json,
+                      cart_clicks,
                       cnpj_q, sel_ufs, sel_cnaes, date_from, date_to,
-                      cart_json, test_size, n_trees,
-                      dup_thresh, emit_thresh):
+                      aux_json_input, bol_json, cart_json,
+                      test_size, n_trees, dup_thresh, emit_thresh):
 
         from dash.exceptions import PreventUpdate
         from dash import ctx
@@ -840,7 +840,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
         dbc.Col(kpi('Total CNPJs',    f'{total:,}',        'base analisada'),                        width=2),
         dbc.Col(kpi('Rating A',       f'{n_excel:,}',      f'{n_excel/total*100:.0f}%',    ACCENT2), width=2),
         dbc.Col(kpi('Score Médio',    f'{score_med:.0f}',  '/ 1000',                       ACCENT),  width=2),
-        dbc.Col(kpi('Carteiras Boas', f'{boas_pct:.1f}%',  'target = 1'),                            width=2),
+        dbc.Col(kpi('Adimplentes', f'{boas_pct:.1f}%',  'adimplência real — target = 1'),                            width=2),
         dbc.Col(kpi('AUC-ROC',        f'{best_auc:.4f}',   best_name.split()[0],           ACCENT2), width=2),
         dbc.Col(kpi('Suspeitos',      f'{n_suspeitos:,}',  'CNPJs c/ flag fraude',         WARN),    width=2),
     ], className='g-3', style={'marginBottom': '20px'})
@@ -1313,7 +1313,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                 section_title('5–6. Target e Correlação',
                     f'Adimplência real: target=1 se sacado sem boletos inadimplentes reais · Parâmetros usados como fallback'),
                 card([html.Div('Distribuição do Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_target_pizza(df_full))]),
-                card([html.Div('Score Materialidade v2 por Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_boxplot_target(df_full, 'score_materialidade_v2', 'Score Materialidade v2'))]),
+                card([html.Div('Score Materialidade v2 por Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_boxplot_target(df_full, 'score_materialidade_evolucao', 'Score Materialidade Evolução'))]),
                 card([html.Div('Liquidez Sacado (1m) por Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_boxplot_target(df_full, 'sacado_indice_liquidez_1m', 'Índice de Liquidez (1m)'))]),
                 card([html.Div('Correlação com o Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_correlacao_target(corr_mat))]),
                 card([html.Div('Matriz de Correlação Completa (Pearson)', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_heatmap_correlacao(corr_mat))]),

@@ -47,7 +47,7 @@ def _fig(fig, height=360, margin=None, **kwargs):
 # ABA EDA — BASE AUXILIAR
 # ─────────────────────────────────────────────────────────────────────────────
 
-def fig_nulos(df_aux: pd.DataFrame) -> go.Figure:
+def fig_nulos(df_aux: pd.DataFrame, excluir: list = None) -> go.Figure:
     """Barras horizontais com % de valores nulos por coluna."""
     pct = (df_aux.isnull().sum() / len(df_aux) * 100).round(1)
     fig = px.bar(x=pct.values, y=pct.index, orientation='h',
@@ -66,6 +66,14 @@ def fig_scores(df_aux: pd.DataFrame) -> go.Figure:
                      nbinsx=40, marker_color=col)
         for c, lbl, col in zip(cols, labels, colors)
     ])
+    # Linha de mediana para cada score
+    for c, lbl, col in zip(cols, labels, colors):
+        med = df_aux[c].median()
+        if pd.notna(med):
+            fig.add_vline(x=med, line_dash='dash', line_color=col, line_width=1.5,
+                          annotation_text=f'{lbl} md: {med:.0f}',
+                          annotation_font_color=col, annotation_font_size=9,
+                          annotation_position='top')
     return _fig(fig, height=360, barmode='overlay',
                 xaxis_title='Score (0–1000)', yaxis_title='Frequência',
                 legend=dict(orientation='h', y=1.05, font=dict(size=12)))
@@ -82,6 +90,13 @@ def fig_liquidez(df_aux: pd.DataFrame) -> go.Figure:
                      nbinsx=35, marker_color=col)
         for c, lbl, col in zip(cols, labels, colors)
     ])
+    for c, lbl, col in zip(cols, labels, colors):
+        med = df_aux[c].median()
+        if pd.notna(med):
+            fig.add_vline(x=med, line_dash='dash', line_color=col, line_width=1.5,
+                          annotation_text=f'{lbl} md: {med:.2f}',
+                          annotation_font_color=col, annotation_font_size=9,
+                          annotation_position='top')
     return _fig(fig, height=360, barmode='overlay',
                 xaxis_title='Índice (0–1)', yaxis_title='Frequência',
                 legend=dict(orientation='h', y=1.05, font=dict(size=12)))
@@ -124,6 +139,12 @@ def fig_atraso_real(df_bol: pd.DataFrame) -> go.Figure:
     fig = px.histogram(atrasados, x='atraso_dias_real', nbins=40,
                        color_discrete_sequence=[WARN],
                        labels={'atraso_dias_real': 'Dias de Atraso'})
+    med = atrasados['atraso_dias_real'].median()
+    if pd.notna(med):
+        fig.add_vline(x=med, line_dash='dash', line_color=AMBER, line_width=2,
+                      annotation_text=f'Mediana: {med:.0f} dias',
+                      annotation_font_color=AMBER, annotation_font_size=10,
+                      annotation_position='top right')
     return _fig(fig, height=360, bargap=0.04)
 
 
@@ -132,7 +153,7 @@ def fig_atraso_real(df_bol: pd.DataFrame) -> go.Figure:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fig_target_pizza(df_full: pd.DataFrame) -> go.Figure:
-    """Donut com proporção Boa vs Ruim."""
+    """Donut com proporção Adimplente vs Inadimplente."""
     dist = df_full['target'].map({0: 'Ruim (0)', 1: 'Boa (1)'}).value_counts().reset_index()
     dist.columns = ['target', 'count']
     fig = px.pie(dist, values='count', names='target', hole=0.48,
