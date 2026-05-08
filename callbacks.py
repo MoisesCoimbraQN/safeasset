@@ -396,6 +396,42 @@ def register_callbacks(app):
         return build_rank_table(R['df_full'], cnpj_q, sel_ufs, sel_cnaes, sel_ratings, score_range)
 
 
+
+    # ── CALLBACK DOWNLOAD — CNPJs com flag de fraude ──────────────────────
+    @app.callback(
+        Output('download-fraude', 'data'),
+        Input('btn-download-fraude', 'n_clicks'),
+        State('store-raw-aux', 'data'),
+        State('store-raw-bol', 'data'),
+        prevent_initial_call=True,
+    )
+    def download_fraude(n_clicks, aux_json, bol_json):
+        if not n_clicks or not aux_json or not bol_json:
+            from dash.exceptions import PreventUpdate
+            raise PreventUpdate
+        try:
+            import pipeline as pl
+            df_aux = read_json(aux_json)
+            df_bol = read_json(bol_json)
+            fraude = pl.detectar_duplicatas(df_bol)
+            df_exp = fraude['fraude_por_cnpj']
+            df_exp = df_exp[df_exp['flag_risco_fraude'] == 1].copy()
+            df_exp['bol_pct_duplicado'] = (df_exp['bol_pct_duplicado']*100).round(1)
+            df_exp = df_exp.rename(columns={
+                'id_pagador': 'CNPJ', 'bol_qtd_total': 'Total Boletos',
+                'bol_qtd_dup_total': 'Duplicatas', 'bol_pct_duplicado': '% Duplicados',
+                'bol_n_emitentes': 'Emitentes', 'motivo_alerta': 'Motivo',
+                'flag_risco_fraude': 'Flag Fraude'
+            })
+            return dcc.send_data_frame(
+                df_exp.to_csv, 'safeasset_cnpjs_fraude.csv',
+                index=False, sep=';', decimal=','
+            )
+        except Exception as e:
+            from dash.exceptions import PreventUpdate
+            print(f"[SafeAsset] Erro download fraude: {e}")
+            raise PreventUpdate
+
     # ── CALLBACK DOWNLOAD — CNPJs para análise individual ─────────────────
     @app.callback(
         Output('download-analise', 'data'),
@@ -981,7 +1017,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                                     'color': ACCENT2, 'marginBottom': '16px',
                                     'borderLeft': f'4px solid {ACCENT2}',
                                     'paddingLeft': '10px'}),
-                    html.Div('Fórmula ponderada: Liquidez (35%) + Materialidade (25%) + Quantidade (15%) + Liq.3m (10%) + Atraso (8%) + Inadimplência (7%)',
+                    html.Div('Fórmula ponderada: Liquidez Sacado (40%) + Materialidade (25%) + Quantidade (15%) + Atraso (12%) + Inadimplência (8%)',
                              style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '16px'}),
                     dbc.Row([
                         dbc.Col(kpi('Score Médio',
@@ -1303,6 +1339,19 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                     html.Div('Nenhum CNPJ suspeito encontrado com os thresholds atuais.',
                              style={'color': ACCENT2, 'fontSize': '13px', 'padding': '12px 0'})
                     if fraude_cnpj[fraude_cnpj['flag_risco_fraude'] == 1].empty else html.Div(),
+                    # Download CNPJs com fraude
+                    *([
+                        html.Hr(style={'borderColor': BORDER, 'margin': '12px 0'}),
+                        dcc.Download(id='download-fraude'),
+                        html.Button('⬇ Baixar CSV — CNPJs com Flag de Fraude',
+                            id='btn-download-fraude', n_clicks=0,
+                            style={'background': BLUE, 'color': WARN,
+                                   'border': f'1px solid {WARN}', 'borderRadius': '8px',
+                                   'padding': '9px 18px', 'fontWeight': '700',
+                                   'cursor': 'pointer',
+                                   'fontFamily': "'Space Grotesk',sans-serif",
+                                   'fontSize': '12px'}),
+                    ] if not fraude_cnpj[fraude_cnpj['flag_risco_fraude'] == 1].empty else []),
                 ]),
               ])]),
 
@@ -1313,7 +1362,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                 section_title('5–6. Target e Correlação',
                     f'Adimplência real: target=1 se sacado sem boletos inadimplentes reais · Parâmetros usados como fallback'),
                 card([html.Div('Distribuição do Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_target_pizza(df_full))]),
-                card([html.Div('Score Materialidade v2 por Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_boxplot_target(df_full, 'score_materialidade_evolucao', 'Score Materialidade Evolução'))]),
+                card([html.Div('Score Materialidade v2 por Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_boxplot_target(df_full, 'score_materialidade_evolucao', 'Score Materialidade Evolução por Target'))]),
                 card([html.Div('Liquidez Sacado (1m) por Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_boxplot_target(df_full, 'sacado_indice_liquidez_1m', 'Índice de Liquidez (1m)'))]),
                 card([html.Div('Correlação com o Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_correlacao_target(corr_mat))]),
                 card([html.Div('Matriz de Correlação Completa (Pearson)', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_heatmap_correlacao(corr_mat))]),
@@ -1379,26 +1428,20 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                         dbc.Col(kpi('Score Baixo + ML Otimista',
                             f'{int(((df_full["score_fidc"]<400)&(df_full["prob_ml_bom"]>=60)).sum()):,}',
                             'score < 300, ML ≥ 70%', ACCENT2), width=3),
-                    ], className='g-3', style={'marginBottom': '16px'}),
-                    dbc.Row([
-                        dbc.Col([card([
-                            html.Div('Score FIDC vs Probabilidade ML — quadrantes de divergência',
-                                     style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '4px'}),
-                            html.Div('CNPJs em laranja merecem atenção especial — os dois sistemas discordam.',
-                                     style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '8px'}),
-                            G(ch.fig_divergencia_ml(df_full)),
-                        ])], width=8),
-                        dbc.Col([card([
-                            html.Div('Distribuição da Prob. ML por Rating',
-                                     style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
-                            G(ch.fig_prob_ml_hist(df_full)),
-                        ])], width=4),
-                    ], className='g-3'),
-                ] if 'prob_ml_bom' in df_full.columns else []),
-
-                # Ranking com filtros
                 card([
-                    html.Div('🏆 Ranking de CNPJs', style={'fontSize': '14px', 'fontWeight': '600', 'marginBottom': '16px'}),
+                    html.Div('Score FIDC vs Probabilidade ML — quadrantes de divergência',
+                             style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '4px'}),
+                    html.Div('CNPJs em laranja merecem atenção especial — os dois sistemas discordam.',
+                             style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '8px'}),
+                    G(ch.fig_divergencia_ml(df_full)),
+                ]),
+                card([
+                    html.Div('Distribuição da Prob. ML por Rating',
+                             style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
+                    G(ch.fig_prob_ml_hist(df_full)),
+                ]),
+                  ] if 'prob_ml_bom' in df_full.columns else []),
+
                     dbc.Row([
                         dbc.Col([dcc.Input(id='rank-cnpj', placeholder='Buscar CNPJ...', debounce=True,
                                            style={'width': '100%', 'background': '#0d1b2a', 'border': f'1px solid {BORDER}',

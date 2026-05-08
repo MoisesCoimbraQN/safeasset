@@ -303,6 +303,7 @@ def calcular_score_macro_setor(indicadores: dict, setor: str) -> dict:
     pib_anual  = ind.get('pib_variacao_anual', 2.0)
     comp_pib   = max(0, min(100, (pib_anual + 4.0) / 10.0 * 100))
     comp_setor = comp_pib  # fallback
+    var_set    = pib_anual  # mantido para compatibilidade do retorno
 
     score = comp_inad * 0.50 + comp_selic * 0.30 + comp_ipca * 0.20
 

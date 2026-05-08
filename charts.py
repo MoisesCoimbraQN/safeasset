@@ -50,10 +50,16 @@ def _fig(fig, height=360, margin=None, **kwargs):
 def fig_nulos(df_aux: pd.DataFrame, excluir: list = None) -> go.Figure:
     """Barras horizontais com % de valores nulos por coluna."""
     pct = (df_aux.isnull().sum() / len(df_aux) * 100).round(1)
+    pct = pct[pct > 0]
+    if excluir:
+        pct = pct[~pct.index.isin(excluir)]
+    if pct.empty:
+        return go.Figure()
     fig = px.bar(x=pct.values, y=pct.index, orientation='h',
                  labels={'x': '% Nulos', 'y': ''},
                  color_discrete_sequence=[WARN])
-    return _fig(fig, height=340, margin=dict(l=230, r=30, t=20, b=40))
+    return _fig(fig, height=max(200, len(pct)*25),
+                margin=dict(l=230, r=30, t=20, b=40))
 
 
 def fig_scores(df_aux: pd.DataFrame) -> go.Figure:
@@ -164,7 +170,7 @@ def fig_target_pizza(df_full: pd.DataFrame) -> go.Figure:
 
 def fig_boxplot_target(df_full: pd.DataFrame, col: str, label: str) -> go.Figure:
     """Box plot de uma variável por target."""
-    x_vals = df_full['target'].map({0: 'Ruim (0)', 1: 'Boa (1)'})
+    x_vals = df_full['target'].map({0: 'Inadimplente', 1: 'Adimplente'})
     fig = px.box(df_full, x=x_vals, y=col,
                  color=x_vals,
                  color_discrete_map={'Boa (1)': ACCENT2, 'Ruim (0)': WARN},
