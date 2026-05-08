@@ -1535,7 +1535,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
 
             # ── CONTEXTO MACROECONÔMICO ───────────────────────────────────
             # ── CNPJs NOVOS (sem histórico) ────────────────────────────────────
-            dcc.Tab(label='⚠️ Carteira em Aquisição - CNPJs sem Histórico', value='tab-novos', style=tab_style,
+            dcc.Tab(label='⚠️ Aquisição - CNPJs Novos', value='tab-novos', style=tab_style,
                     selected_style={**tab_sel, 'background': WARN, 'color': NAVY},
               children=[html.Div(style={'padding': '24px'}, children=[
 
@@ -1754,7 +1754,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
               ])]),
 
             # ── CARTEIRA EM AQUISIÇÃO — CNPJs COM HISTÓRICO ─────────────────
-            dcc.Tab(label='✅ Carteira em Aquisição - CNPJs com Histórico',
+            dcc.Tab(label='✅ Aquisição - CNPJs c/ Histórico',
                     value='tab-conhecidos', style=tab_style,
                     selected_style={**tab_sel, 'background': ACCENT2, 'color': NAVY},
               children=[html.Div(style={'padding': '24px'}, children=[
