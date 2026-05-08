@@ -956,7 +956,7 @@ def fig_liquidez_hist_conhecidos(df: pd.DataFrame) -> go.Figure:
     vals = df['sacado_indice_liquidez_1m'].dropna()
     fig = go.Figure(go.Histogram(
         x=vals, nbinsx=25,
-        marker_color=TEAL, opacity=0.85,
+        marker_color=ACCENT2, opacity=0.85,
     ))
     med = vals.median()
     fig.add_vline(x=med, line_dash='dash', line_color=AMBER, line_width=2,
