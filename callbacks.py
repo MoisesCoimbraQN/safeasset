@@ -552,7 +552,8 @@ def register_callbacks(app):
                     'data_coleta': FALLBACK['data_referencia'], 'fonte': 'fallback',
                 })
         import json as _json
-        from macro import enriquecer_perfil_com_macro, calcular_score_macro_setor, CNAE_SETOR
+        from macro import enriquecer_perfil_com_macro, calcular_score_macro_setor, CNAE_SETOR, calcular_quartis_macro
+        _p25, _p75 = calcular_quartis_macro()
         print("[SafeAsset] update_macro_content iniciando...")
         try:
             dados  = _json.loads(macro_store_json)
@@ -566,7 +567,7 @@ def register_callbacks(app):
 
 
             # Criar df_full mínimo para calcular perfil CNAE
-            from macro import enriquecer_perfil_com_macro, calcular_score_macro_setor, CNAE_SETOR
+            from macro import enriquecer_perfil_com_macro, calcular_score_macro_setor, CNAE_SETOR, calcular_quartis_macro
             import pandas as _pd
 
             # Formatar CNAE e agrupar
@@ -582,17 +583,17 @@ def register_callbacks(app):
                 div   = str(cnae_fmt).split('.')[0]
                 setor = CNAE_SETOR.get(div, 'servicos')
                 if setor not in scores:
-                    scores[setor] = calcular_score_macro_setor(ind, setor)
+                    scores[setor] = calcular_score_macro_setor(ind, setor, p25=_p25, p75=_p75)
 
             # Enriquecer perfil com macro
             perfil['setor_macro'] = perfil['cd_cnae_fmt'].apply(
                 lambda x: CNAE_SETOR.get(str(x).split('.')[0], 'servicos')
             )
             perfil['score_macro'] = perfil['setor_macro'].apply(
-                lambda s: calcular_score_macro_setor(ind, s)['score']
+                lambda s: calcular_score_macro_setor(ind, s, p25=_p25, p75=_p75)['score']
             )
             perfil['nivel_macro'] = perfil['setor_macro'].apply(
-                lambda s: calcular_score_macro_setor(ind, s)['nivel']
+                lambda s: calcular_score_macro_setor(ind, s, p25=_p25, p75=_p75)['nivel']
             )
 
             # Calcular Indicador de Risco Setorial
@@ -1362,7 +1363,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                 section_title('5–6. Target e Correlação',
                     f'Adimplência real: target=1 se sacado sem boletos inadimplentes reais · Parâmetros usados como fallback'),
                 card([html.Div('Distribuição do Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_target_pizza(df_full))]),
-                card([html.Div('Score Materialidade v2 por Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_boxplot_target(df_full, 'score_materialidade_evolucao', 'Score Materialidade Evolução por Target'))]),
+                card([html.Div('Score Materialidade Evolução por Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_boxplot_target(df_full, 'score_materialidade_evolucao', 'Score Materialidade Evolução por Target'))]),
                 card([html.Div('Liquidez Sacado (1m) por Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_boxplot_target(df_full, 'sacado_indice_liquidez_1m', 'Índice de Liquidez (1m)'))]),
                 card([html.Div('Correlação com o Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_correlacao_target(corr_mat))]),
                 card([html.Div('Matriz de Correlação Completa (Pearson)', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_heatmap_correlacao(corr_mat))]),
@@ -1402,7 +1403,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
             dcc.Tab(label='🥇 Score Final', value='tab-score', style=tab_style, selected_style=tab_sel,
               children=[html.Div(style={'padding': '24px'}, children=[
                 section_title('11. Score Final de Qualidade',
-                    'Fórmula composta: Liquidez (35%) + Materialidade (25%) + Quantidade (15%) + Liq.3m (10%) + Atraso (8%) + Inadimplência (7%)'),
+                    'Fórmula composta: Liquidez Sacado (40%) + Materialidade (25%) + Quantidade (15%) + Atraso (12%) + Inadimplência (8%)'),
                 card([html.Div('Distribuição do Score FIDC', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_score_histograma(df_full))]),
                 card([html.Div('CNPJs por Rating de Carteira', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_rating_barras(df_full))]),
                 card([html.Div('Score FIDC Médio por UF', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_score_por_uf(df_full))]),

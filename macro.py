@@ -271,7 +271,36 @@ _INAD_REF = {
 _INAD_REF_DEFAULT = 4.0
 
 
-def calcular_score_macro_setor(indicadores: dict, setor: str) -> dict:
+
+def calcular_quartis_macro() -> tuple:
+    """
+    Calcula P25 e P75 do score macro histórico UMA ÚNICA VEZ.
+    Usa séries BCB: inadimplência total (21082), SELIC (432), IPCA (13522).
+    Retorna (p25, p75) para uso em calcular_score_macro_setor.
+    """
+    try:
+        import numpy as _np
+        _dfs = [
+            _bcb_serie_historico(21082, n=24),
+            _bcb_serie_historico(432,   n=24),
+            _bcb_serie_historico(13522, n=24),
+        ]
+        _n = min(len(d) for d in _dfs)
+        if _n >= 8:
+            _sh = []
+            for _i in range(_n):
+                _ci = max(0, min(100, 100-(float(_dfs[0]['valor'].iloc[_i])/10)*100))
+                _cs = max(0, min(100, 100-((float(_dfs[1]['valor'].iloc[_i])-2)/13)*100))
+                _cp = max(0, min(100, 100-(float(_dfs[2]['valor'].iloc[_i])/12)*100))
+                _sh.append(_ci*0.50 + _cs*0.30 + _cp*0.20)
+            return float(_np.percentile(_sh, 25)), float(_np.percentile(_sh, 75))
+    except Exception:
+        pass
+    return 45.0, 65.0
+
+
+def calcular_score_macro_setor(indicadores: dict, setor: str,
+                               p25: float = 45.0, p75: float = 65.0) -> dict:
     """
     Calcula o Score Macro Setorial (0–100) para um setor específico.
 
@@ -306,29 +335,6 @@ def calcular_score_macro_setor(indicadores: dict, setor: str) -> dict:
     var_set    = pib_anual  # mantido para compatibilidade do retorno
 
     score = comp_inad * 0.50 + comp_selic * 0.30 + comp_ipca * 0.20
-
-    # Faixas por quartis históricos P25/P75
-    try:
-        import numpy as _np
-        _dfs = [
-            _bcb_serie_historico(SERIES_BCB.get(inad_chave, 21082), n=24),
-            _bcb_serie_historico(432,   n=24),
-            _bcb_serie_historico(13522, n=24),
-        ]
-        _n = min(len(d) for d in _dfs)
-        if _n >= 8:
-            _sh = []
-            for _i in range(_n):
-                _ci = max(0, min(100, 100-(float(_dfs[0]['valor'].iloc[_i])/10)*100))
-                _cs = max(0, min(100, 100-((float(_dfs[1]['valor'].iloc[_i])-2)/13)*100))
-                _cp = max(0, min(100, 100-(float(_dfs[2]['valor'].iloc[_i])/12)*100))
-                _sh.append(_ci*0.50 + _cs*0.30 + _cp*0.20)
-            p25 = float(_np.percentile(_sh, 25))
-            p75 = float(_np.percentile(_sh, 75))
-        else:
-            p25, p75 = 45.0, 65.0
-    except Exception:
-        p25, p75 = 45.0, 65.0
 
     if score >= p75:
         nivel, cor = "Favorável",    "#00cc70"

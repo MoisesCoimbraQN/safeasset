@@ -160,10 +160,10 @@ def fig_atraso_real(df_bol: pd.DataFrame) -> go.Figure:
 
 def fig_target_pizza(df_full: pd.DataFrame) -> go.Figure:
     """Donut com proporção Adimplente vs Inadimplente."""
-    dist = df_full['target'].map({0: 'Ruim (0)', 1: 'Boa (1)'}).value_counts().reset_index()
+    dist = df_full['target'].map({0: 'Inadimplente', 1: 'Adimplente'}).value_counts().reset_index()
     dist.columns = ['target', 'count']
     fig = px.pie(dist, values='count', names='target', hole=0.48,
-                 color_discrete_map={'Boa (1)': ACCENT2, 'Ruim (0)': WARN})
+                 color_discrete_map={'Adimplente': ACCENT2, 'Inadimplente': WARN})
     return _fig(fig, height=380, margin=dict(l=20, r=20, t=20, b=20),
                 legend=dict(font=dict(size=14)))
 
@@ -173,7 +173,7 @@ def fig_boxplot_target(df_full: pd.DataFrame, col: str, label: str) -> go.Figure
     x_vals = df_full['target'].map({0: 'Inadimplente', 1: 'Adimplente'})
     fig = px.box(df_full, x=x_vals, y=col,
                  color=x_vals,
-                 color_discrete_map={'Boa (1)': ACCENT2, 'Ruim (0)': WARN},
+                 color_discrete_map={'Adimplente': ACCENT2, 'Inadimplente': WARN},
                  labels={'x': 'Classificação', 'y': label})
     return _fig(fig, height=380, showlegend=False,
                 margin=dict(l=80, r=30, t=20, b=60))
