@@ -980,10 +980,6 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
         colors={'border': BORDER, 'primary': ACCENT, 'background': CARD_BG},
         children=[
 
-            # ════ GRUPO: VISÃO GERAL ══════════════════════════════════════
-            dcc.Tab(label='— VISÃO GERAL —', value='_sep_geral', disabled=True,
-                    style={**_sep_style, 'color': '#888780'}),
-
             # ── RESUMO INDICATIVO ─────────────────────────────────────────
             dcc.Tab(label='📋 Resumo', value='tab-resumo',
                     style=TAB_NEUT_STYLE,
@@ -1325,11 +1321,8 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
 
               ])]),
 
-            # ════ GRUPO: ANÁLISE HISTÓRICA ═══════════════════════════════
-            dcc.Tab(label='— ANÁLISE HISTÓRICA —', value='_sep_historico', disabled=True,
-                    style={**_sep_style, 'color': '#378ADD'}),
-
-            dcc.Tab(label='📊 EDA', value='tab-eda', style=TAB_HIST_STYLE, selected_style=TAB_HIST_SEL,
+            # ════ ANÁLISE HISTÓRICA ═══════════════════════════════════════
+            dcc.Tab(label='[H] 📊 EDA', value='tab-eda', style=TAB_HIST_STYLE, selected_style=TAB_HIST_SEL,
               children=[html.Div(style={'padding': '24px'}, children=[
                 section_title('2–3. Análise Exploratória', 'Distribuições, nulos, volumes temporais'),
                 card([html.Div('Nulos por Coluna (%)', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_nulos(df_full))]),
@@ -1358,7 +1351,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
               ])]),
 
             # ── ANÁLISE DE FRAUDE ─────────────────────────────────────────
-            dcc.Tab(label='🚨 Fraude', value='tab-fraude', style=TAB_HIST_STYLE, selected_style={**TAB_HIST_SEL, 'background': WARN, 'color': NAVY},
+            dcc.Tab(label='[H] 🚨 Fraude', value='tab-fraude', style=TAB_HIST_STYLE, selected_style={**TAB_HIST_SEL, 'background': WARN, 'color': NAVY},
               children=[html.Div(style={'padding': '24px'}, children=[
                 section_title('2B. Detecção de Boletos Duplicados',
                     f'Threshold: ≥ {fraude_stats["pct_dup_thresh"]*100:.0f}% duplicados  OU  ≥ {fraude_stats["n_emit_thresh"]} emitentes distintos'),
@@ -1447,7 +1440,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
 
 
             # ── TARGET & CORRELAÇÃO ───────────────────────────────────────
-            dcc.Tab(label='🎯 Target & Correlação', style=TAB_HIST_STYLE, selected_style=TAB_HIST_SEL,
+            dcc.Tab(label='[H] 🎯 Target & Correlação', style=TAB_HIST_STYLE, selected_style=TAB_HIST_SEL,
               children=[html.Div(style={'padding': '24px'}, children=[
                 section_title('5–6. Target e Correlação',
                     f'Adimplência real: target=1 se sacado sem boletos inadimplentes reais · Parâmetros usados como fallback'),
@@ -1459,7 +1452,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
               ])]),
 
             # ── MODELAGEM ─────────────────────────────────────────────────
-            dcc.Tab(label='🤖 Modelagem', value='tab-ml', style=TAB_HIST_STYLE, selected_style=TAB_HIST_SEL,
+            dcc.Tab(label='[H] 🤖 Modelagem', value='tab-ml', style=TAB_HIST_STYLE, selected_style=TAB_HIST_SEL,
               children=[html.Div(style={'padding': '24px'}, children=[
                 section_title('7–8. Modelagem Preditiva', 'Pipeline: Imputer → Scaler → Modelo · Cross-Validation k=5'),
                 card([
@@ -1489,7 +1482,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
 
 
             # ── SCORE FINAL ───────────────────────────────────────────────
-            dcc.Tab(label='🥇 Score Final', value='tab-score', style=TAB_HIST_STYLE, selected_style=TAB_HIST_SEL,
+            dcc.Tab(label='[H] 🥇 Score Final', value='tab-score', style=TAB_HIST_STYLE, selected_style=TAB_HIST_SEL,
               children=[html.Div(style={'padding': '24px'}, children=[
                 section_title('11. Score Final de Qualidade',
                     'Fórmula composta: Liquidez Sacado (40%) + Materialidade (25%) + Quantidade (15%) + Atraso (12%) + Inadimplência (8%)'),
@@ -1567,12 +1560,22 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                 ]),
               ])]),
 
-            # ════ GRUPO: DECISÃO DE AQUISIÇÃO ════════════════════════════
-            dcc.Tab(label='— DECISÃO DE AQUISIÇÃO —', value='_sep_aquisicao', disabled=True,
-                    style={**_sep_style, 'color': '#639922'}),
+            dcc.Tab(label='[H] 🌐 Macro', value='tab-macro', style=TAB_HIST_STYLE,
+                    selected_style={**TAB_HIST_SEL, 'background': '#2563EB'},
+              children=[html.Div(style={'padding': '24px'}, children=[
+                section_title('Contexto Macroeconômico — Camada 1',
+                    'Fontes: BCB SGS · IBGE SIDRA · Dados buscados automaticamente no upload'),
+                html.Div(id='macro-content',
+                    children=html.Div(
+                        '🌐 Faça o upload dos dois arquivos CSV para carregar os dados macroeconômicos.',
+                        style={'color': MUTED, 'fontSize': '14px',
+                               'textAlign': 'center', 'padding': '40px'}
+                    )
+                ),
+              ])]),
 
-            # ── CNPJs NOVOS (sem histórico) ───────────────────────────────
-            dcc.Tab(label='⚠️ Aquisição - CNPJs Novos', value='tab-novos', style=TAB_ACQ_STYLE,
+            # ════ DECISÃO DE AQUISIÇÃO ════════════════════════════════════
+            dcc.Tab(label='[A] ⚠️ Novos', value='tab-novos', style=TAB_ACQ_STYLE,
                     selected_style={**TAB_ACQ_SEL, 'background': WARN, 'color': NAVY},
               children=[html.Div(style={'padding': '24px'}, children=[
 
@@ -1791,7 +1794,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
               ])]),
 
             # ── CARTEIRA EM AQUISIÇÃO — CNPJs COM HISTÓRICO ─────────────────
-            dcc.Tab(label='✅ Aquisição - CNPJs c/ Histórico',
+            dcc.Tab(label='[A] ✅ Histórico',
                     value='tab-conhecidos', style=TAB_ACQ_STYLE,
                     selected_style={**TAB_ACQ_SEL, 'background': ACCENT2, 'color': NAVY},
               children=[html.Div(style={'padding': '24px'}, children=[
@@ -1919,19 +1922,6 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
 
               ])]),
 
-            dcc.Tab(label='🌐 Macro', value='tab-macro', style=TAB_HIST_STYLE,
-                    selected_style={**TAB_HIST_SEL, 'background': '#2563EB'},
-              children=[html.Div(style={'padding': '24px'}, children=[
-                section_title('Contexto Macroeconômico — Camada 1',
-                    'Fontes: BCB SGS · IBGE SIDRA · Dados buscados automaticamente no upload'),
-                html.Div(id='macro-content',
-                    children=html.Div(
-                        '🌐 Faça o upload dos dois arquivos CSV para carregar os dados macroeconômicos.',
-                        style={'color': MUTED, 'fontSize': '14px',
-                               'textAlign': 'center', 'padding': '40px'}
-                    )
-                ),
-              ])]),
         ]
     )
 
