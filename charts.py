@@ -886,3 +886,107 @@ def fig_vlr_distribuicao_novos(df: pd.DataFrame) -> go.Figure:
                 margin=dict(l=60, r=40, t=20, b=50),
                 xaxis_title='Valor Nominal (R$)',
                 yaxis_title='Qtd Boletos')
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GRÁFICOS PARA ABA CNPJs COM HISTÓRICO
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fig_target_pizza_conhecidos(df: pd.DataFrame) -> go.Figure:
+    """Pizza de ratings dos CNPJs conhecidos na carteira."""
+    if df.empty or 'rating_carteira' not in df.columns:
+        return go.Figure()
+    ct = df['rating_carteira'].value_counts()
+    cores = [RATING_COLOR.get(r, MUTED) for r in ct.index]
+    fig = go.Figure(go.Pie(
+        labels=ct.index, values=ct.values,
+        hole=0.45, marker_colors=cores,
+        textinfo='label+percent',
+        textfont=dict(size=10, color=WHITE),
+    ))
+    return _fig(fig, height=300, margin=dict(l=10, r=10, t=20, b=10),
+                showlegend=False)
+
+
+def fig_score_hist_conhecidos(df: pd.DataFrame) -> go.Figure:
+    """Histograma de scores FIDC dos CNPJs conhecidos."""
+    if df.empty or 'score_fidc' not in df.columns:
+        return go.Figure()
+    fig = go.Figure(go.Histogram(
+        x=df['score_fidc'], nbinsx=30,
+        marker_color=ACCENT, opacity=0.85,
+    ))
+    med = df['score_fidc'].median()
+    fig.add_vline(x=med, line_dash='dash', line_color=AMBER, line_width=2,
+                  annotation_text=f'Mediana: {med:.0f}',
+                  annotation_font_color=AMBER, annotation_font_size=10)
+    return _fig(fig, height=280,
+                margin=dict(l=50, r=40, t=30, b=40),
+                xaxis_title='Score FIDC (0–1000)',
+                yaxis_title='Qtd CNPJs')
+
+
+def fig_valor_por_rating(df: pd.DataFrame) -> go.Figure:
+    """Barras de valor total por rating."""
+    if df.empty or 'rating_carteira' not in df.columns or 'vlr_cart' not in df.columns:
+        return go.Figure()
+    ordem = ['A — Excelente', 'B — Bom', 'C — Risco Moderado',
+             'D — Risco Elevado', 'E — Alto Risco']
+    grp = df.groupby('rating_carteira')['vlr_cart'].sum().reindex(
+        [r for r in ordem if r in df['rating_carteira'].unique()]
+    ).fillna(0)
+    cores = [RATING_COLOR.get(r, MUTED) for r in grp.index]
+    fig = go.Figure(go.Bar(
+        x=grp.index, y=grp.values,
+        marker_color=cores, opacity=0.85,
+        text=[f'R$ {v:,.0f}' for v in grp.values],
+        textposition='outside',
+        textfont=dict(color=WHITE, size=9),
+    ))
+    return _fig(fig, height=280,
+                margin=dict(l=60, r=40, t=30, b=80),
+                xaxis_title='Rating',
+                yaxis_title='Valor Total (R$)')
+
+
+def fig_liquidez_hist_conhecidos(df: pd.DataFrame) -> go.Figure:
+    """Histograma de liquidez sacado 1m dos CNPJs conhecidos."""
+    if df.empty or 'sacado_indice_liquidez_1m' not in df.columns:
+        return go.Figure()
+    vals = df['sacado_indice_liquidez_1m'].dropna()
+    fig = go.Figure(go.Histogram(
+        x=vals, nbinsx=25,
+        marker_color=TEAL, opacity=0.85,
+    ))
+    med = vals.median()
+    fig.add_vline(x=med, line_dash='dash', line_color=AMBER, line_width=2,
+                  annotation_text=f'Mediana: {med:.2f}',
+                  annotation_font_color=AMBER, annotation_font_size=10)
+    return _fig(fig, height=280,
+                margin=dict(l=50, r=40, t=30, b=40),
+                xaxis_title='Liquidez Sacado (0–1)',
+                yaxis_title='Qtd CNPJs')
+
+
+def fig_top10_valor(df: pd.DataFrame) -> go.Figure:
+    """Top 10 CNPJs por valor na carteira com rating colorido."""
+    if df.empty or 'vlr_cart' not in df.columns:
+        return go.Figure()
+    top = df.nlargest(10, 'vlr_cart')[['id_cnpj','vlr_cart','rating_carteira',
+                                        'score_fidc']].copy()
+    top['label'] = top['id_cnpj'].str[:12] + '…'
+    top['cor']   = top['rating_carteira'].map(RATING_COLOR).fillna(MUTED)
+    fig = go.Figure(go.Bar(
+        x=top['vlr_cart'], y=top['label'],
+        orientation='h',
+        marker_color=top['cor'].tolist(),
+        opacity=0.85,
+        text=[f'Score {s:.0f} · {r.split(" — ")[0]}'
+              for s, r in zip(top['score_fidc'], top['rating_carteira'])],
+        textposition='inside',
+        textfont=dict(color=WHITE, size=9),
+    ))
+    return _fig(fig, height=320,
+                margin=dict(l=120, r=60, t=20, b=40),
+                xaxis_title='Valor na Carteira (R$)',
+                yaxis_title='CNPJ')

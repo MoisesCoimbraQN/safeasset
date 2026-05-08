@@ -432,6 +432,44 @@ def register_callbacks(app):
             print(f"[SafeAsset] Erro download fraude: {e}")
             raise PreventUpdate
 
+    # ── CALLBACK DOWNLOAD — CNPJs com histórico PCR ─────────────────────
+    @app.callback(
+        Output('download-conhecidos', 'data'),
+        Input('btn-download-conhecidos', 'n_clicks'),
+        State('store-raw-aux', 'data'),
+        State('store-raw-bol', 'data'),
+        State('store-raw-cart', 'data'),
+        prevent_initial_call=True,
+    )
+    def download_conhecidos(n_clicks, aux_json, bol_json, cart_json):
+        if not n_clicks or not aux_json or not bol_json or not cart_json:
+            from dash.exceptions import PreventUpdate
+            raise PreventUpdate
+        try:
+            import pipeline as pl
+            df_aux  = read_json(aux_json)
+            df_bol  = read_json(bol_json)
+            df_cart = read_json(cart_json)
+            R = pl.run_pipeline(df_aux.copy(), df_bol.copy())
+            df_full = R['df_full']
+            col_pag = 'id_pagador' if 'id_pagador' in df_cart.columns else 'id_cnpj'
+            conhecidos = set(df_cart[col_pag].astype(str)) & set(df_full['id_cnpj'].astype(str))
+            df_exp = df_full[df_full['id_cnpj'].astype(str).isin(conhecidos)].copy()
+            vlr = df_cart.groupby(col_pag)['vlr_nominal'].sum().reset_index()
+            vlr.columns = ['id_cnpj', 'vlr_carteira']
+            df_exp = df_exp.merge(vlr.rename(columns={col_pag:'id_cnpj'}), on='id_cnpj', how='left')
+            cols = ['id_cnpj','uf','cd_cnae_prin','score_fidc','rating_carteira',
+                    'prob_ml_bom','flag_risco_fraude','sacado_indice_liquidez_1m',
+                    'vlr_carteira']
+            cols = [c for c in cols if c in df_exp.columns]
+            df_exp = df_exp[cols].sort_values('score_fidc', ascending=False)
+            return dcc.send_data_frame(df_exp.to_csv,
+                'safeasset_cnpjs_com_historico.csv', index=False, sep=';', decimal=',')
+        except Exception as e:
+            from dash.exceptions import PreventUpdate
+            print(f"[SafeAsset] Erro download conhecidos: {e}")
+            raise PreventUpdate
+
     # ── CALLBACK DOWNLOAD — CNPJs para análise individual ─────────────────
     @app.callback(
         Output('download-analise', 'data'),
@@ -719,7 +757,7 @@ def register_callbacks(app):
                 card([
                     html.Div('Score Macroeconômico por Setor da Carteira',
                              style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '4px'}),
-                    html.Div('Inadimplência setorial (40%) · PIB (25%) · SELIC (15%) · IPCA (10%) · Indicador setorial (10%)',
+                    html.Div('Inadimplência setorial BCB (50%) · SELIC (30%) · IPCA (20%) · Faixas por quartis históricos 24m',
                              style={'fontSize': '10px', 'color': MUTED, 'marginBottom': '10px'}),
                     G(ch.fig_score_macro_setores(scores)),
                 ]),
@@ -797,6 +835,23 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
     # Usado apenas para o semáforo setorial no Resumo (se já disponível no R)
     macro = R.get('macro') or {}
     cob   = R.get('cobertura', {})
+
+    # df_conhecidos — CNPJs da carteira que TÊM histórico no df_full
+    _df_carteira = R.get('df_carteira')
+    if _df_carteira is not None and len(_df_carteira) > 0:
+        _col_pag2     = 'id_pagador' if 'id_pagador' in _df_carteira.columns else 'id_cnpj'
+        _cnpjs_full2  = set(df_full['id_cnpj'].astype(str).unique())
+        _cnpjs_cart2  = set(_df_carteira[_col_pag2].astype(str).unique())
+        _conhecidos   = _cnpjs_cart2 & _cnpjs_full2
+        df_conhecidos = df_full[df_full['id_cnpj'].astype(str).isin(_conhecidos)].copy()
+        # Adicionar vlr_nominal da carteira
+        _vlr = _df_carteira.groupby(_col_pag2)['vlr_nominal'].sum().reset_index()
+        _vlr.columns = ['id_cnpj', 'vlr_cart']
+        df_conhecidos = df_conhecidos.merge(_vlr.rename(columns={_col_pag2:'id_cnpj'}),
+                                            on='id_cnpj', how='left')
+        df_conhecidos['vlr_cart'] = df_conhecidos['vlr_cart'].fillna(0)
+    else:
+        df_conhecidos = pd.DataFrame()
 
     # df_cart_novos e df_novos — baseados na carteira nova vs df_full histórico
     _df_carteira = R.get('df_carteira')
@@ -1480,7 +1535,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
 
             # ── CONTEXTO MACROECONÔMICO ───────────────────────────────────
             # ── CNPJs NOVOS (sem histórico) ────────────────────────────────────
-            dcc.Tab(label='🔍 CNPJs Novos', value='tab-novos', style=tab_style,
+            dcc.Tab(label='⚠️ Carteira em Aquisição - CNPJs sem Histórico', value='tab-novos', style=tab_style,
                     selected_style={**tab_sel, 'background': WARN, 'color': NAVY},
               children=[html.Div(style={'padding': '24px'}, children=[
 
@@ -1695,6 +1750,135 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                     html.Div('Nenhuma análise manual adicional necessária.',
                              style={'fontSize': '13px', 'color': MUTED, 'marginTop': '6px'}),
                 ], style={'textAlign': 'center', 'padding': '60px'})]),
+
+              ])]),
+
+            # ── CARTEIRA EM AQUISIÇÃO — CNPJs COM HISTÓRICO ─────────────────
+            dcc.Tab(label='✅ Carteira em Aquisição - CNPJs com Histórico',
+                    value='tab-conhecidos', style=tab_style,
+                    selected_style={**tab_sel, 'background': ACCENT2, 'color': NAVY},
+              children=[html.Div(style={'padding': '24px'}, children=[
+
+                section_title('Carteira em Aquisição — CNPJs com Histórico PCR',
+                    'CNPJs da carteira nova que possuem histórico na base PCR — análise de risco disponível'),
+
+                *([
+
+                    # ── KPIs ─────────────────────────────────────────────────
+                    card([
+                        html.Div('Visão Geral dos CNPJs com Histórico',
+                                 style={'fontSize': '15px', 'fontWeight': '700',
+                                        'color': ACCENT2, 'marginBottom': '16px',
+                                        'borderLeft': f'4px solid {ACCENT2}',
+                                        'paddingLeft': '10px'}),
+                        dbc.Row([
+                            dbc.Col(kpi('CNPJs com Histórico',
+                                f'{len(df_conhecidos):,}',
+                                f'de {cob["total_cnpjs"]:,} na carteira',
+                                ACCENT2), width=2),
+                            dbc.Col(kpi('Valor Total',
+                                f'R$ {df_conhecidos["vlr_cart"].sum():,.0f}',
+                                f'{df_conhecidos["vlr_cart"].sum()/cob["vlr_total"]*100:.1f}% da carteira'
+                                if cob.get("vlr_total") else '—',
+                                ACCENT), width=2),
+                            dbc.Col(kpi('Score Médio',
+                                f'{df_conhecidos["score_fidc"].mean():.0f}',
+                                f'Mín: {df_conhecidos["score_fidc"].min():.0f} · Máx: {df_conhecidos["score_fidc"].max():.0f}',
+                                ACCENT), width=2),
+                            dbc.Col(kpi('Rating A+B',
+                                f'{int(df_conhecidos["rating_carteira"].isin(["A — Excelente","B — Bom"]).sum()):,}',
+                                f'{df_conhecidos["rating_carteira"].isin(["A — Excelente","B — Bom"]).mean()*100:.1f}%',
+                                ACCENT2), width=2),
+                            dbc.Col(kpi('Com Alerta Fraude',
+                                f'{int(df_conhecidos["flag_risco_fraude"].sum()):,}'
+                                if 'flag_risco_fraude' in df_conhecidos.columns else '—',
+                                f'{df_conhecidos["flag_risco_fraude"].mean()*100:.1f}%'
+                                if 'flag_risco_fraude' in df_conhecidos.columns else '',
+                                WARN if df_conhecidos.get("flag_risco_fraude", pd.Series([0])).sum() > 0 else ACCENT2), width=2),
+                            dbc.Col(kpi('Score ML Médio',
+                                f'{df_conhecidos["prob_ml_bom"].mean():.1f}%'
+                                if 'prob_ml_bom' in df_conhecidos.columns else '—',
+                                'indicador auxiliar de risco',
+                                '#a78bfa'), width=2),
+                        ], className='g-2'),
+                    ]),
+
+                    # ── Gráficos linha 1 ─────────────────────────────────────
+                    dbc.Row([
+                        dbc.Col([
+                            card([
+                                html.Div('Distribuição de Ratings na Carteira',
+                                         style={'fontSize': '12px', 'color': MUTED,
+                                                'marginBottom': '8px'}),
+                                G(ch.fig_target_pizza_conhecidos(df_conhecidos)),
+                            ]),
+                        ], width=4),
+                        dbc.Col([
+                            card([
+                                html.Div('Distribuição de Scores FIDC',
+                                         style={'fontSize': '12px', 'color': MUTED,
+                                                'marginBottom': '8px'}),
+                                G(ch.fig_score_hist_conhecidos(df_conhecidos)),
+                            ]),
+                        ], width=8),
+                    ], className='g-3'),
+
+                    # ── Gráficos linha 2 ─────────────────────────────────────
+                    dbc.Row([
+                        dbc.Col([
+                            card([
+                                html.Div('Valor em Risco por Rating',
+                                         style={'fontSize': '12px', 'color': MUTED,
+                                                'marginBottom': '8px'}),
+                                G(ch.fig_valor_por_rating(df_conhecidos)),
+                            ]),
+                        ], width=6),
+                        dbc.Col([
+                            card([
+                                html.Div('Distribuição de Liquidez Sacado (1m)',
+                                         style={'fontSize': '12px', 'color': MUTED,
+                                                'marginBottom': '8px'}),
+                                G(ch.fig_liquidez_hist_conhecidos(df_conhecidos)),
+                            ]),
+                        ], width=6),
+                    ], className='g-3'),
+
+                    # ── Top 10 por valor ─────────────────────────────────────
+                    card([
+                        html.Div('Top 10 CNPJs por Valor na Carteira',
+                                 style={'fontSize': '12px', 'color': MUTED,
+                                        'marginBottom': '8px'}),
+                        G(ch.fig_top10_valor(df_conhecidos)),
+                    ]),
+
+                    # ── Download ─────────────────────────────────────────────
+                    card([
+                        html.Div('📥 Download — CNPJs com Histórico PCR',
+                                 style={'fontSize': '14px', 'fontWeight': '700',
+                                        'color': WHITE, 'marginBottom': '8px',
+                                        'borderLeft': f'4px solid {ACCENT2}',
+                                        'paddingLeft': '10px'}),
+                        html.Div(f'{len(df_conhecidos):,} CNPJs com score, rating e indicadores de risco.',
+                                 style={'fontSize': '11px', 'color': MUTED,
+                                        'marginBottom': '12px'}),
+                        dcc.Download(id='download-conhecidos'),
+                        html.Button('⬇ Baixar CSV — CNPJs com Histórico',
+                            id='btn-download-conhecidos', n_clicks=0,
+                            style={'background': BLUE, 'color': ACCENT2,
+                                   'border': f'1px solid {ACCENT2}',
+                                   'borderRadius': '8px', 'padding': '10px 20px',
+                                   'fontWeight': '700', 'cursor': 'pointer',
+                                   'fontFamily': "'Space Grotesk',sans-serif",
+                                   'fontSize': '13px'}),
+                    ]),
+
+                ] if not df_conhecidos.empty else [
+                    html.Div([
+                        html.Div('📂', style={'fontSize': '48px', 'marginBottom': '12px'}),
+                        html.Div('Faça o upload da carteira nova para ver os CNPJs com histórico PCR.',
+                                 style={'fontSize': '15px', 'color': MUTED}),
+                    ], style={'textAlign': 'center', 'padding': '60px'}),
+                ]),
 
               ])]),
 
