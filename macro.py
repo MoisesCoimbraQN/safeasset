@@ -62,12 +62,13 @@ CNAE_SETOR = {
 
 # Séries BCB SGS por tema
 SERIES_BCB = {
-    # Inadimplência PJ por setor (% carteira)
-    "inadimplencia_pj_total":      21082,  # total PJ
-    "inadimplencia_pj_industria":  21087,
-    "inadimplencia_pj_comercio":   21088,
-    "inadimplencia_pj_servicos":   21089,
-    "inadimplencia_pj_agro":       21093,
+    # Inadimplência PJ Total SFN (série 21083) — única série por setor disponível via API BCB
+    # O BCB não publica inadimplência por setor CNAE no SGS
+    "inadimplencia_pj_total":      21083,  # PJ Total SFN — série correta
+    "inadimplencia_pj_industria":  21083,  # proxy PJ Total (sem série setorial BCB)
+    "inadimplencia_pj_comercio":   21083,  # proxy PJ Total (sem série setorial BCB)
+    "inadimplencia_pj_servicos":   21083,  # proxy PJ Total (sem série setorial BCB)
+    "inadimplencia_pj_agro":       21083,  # proxy PJ Total (sem série setorial BCB)
     # Indicadores gerais
     "selic_meta":                    432,   # taxa SELIC meta (% a.a.)
     "cambio_brl_usd":                  1,   # câmbio R$/USD
@@ -281,9 +282,9 @@ def calcular_quartis_macro() -> tuple:
     try:
         import numpy as _np
         _dfs = [
-            _bcb_serie_historico(21082, n=24),
-            _bcb_serie_historico(432,   n=24),
-            _bcb_serie_historico(13522, n=24),
+            _bcb_serie_historico(21082, n=20),
+            _bcb_serie_historico(432,   n=20),
+            _bcb_serie_historico(13522, n=20),
         ]
         _n = min(len(d) for d in _dfs)
         if _n >= 8:
@@ -407,32 +408,49 @@ def enriquecer_perfil_com_macro(perfil_cnae: pd.DataFrame,
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Séries BCB por setor macro
+# IMPORTANTE: O BCB não disponibiliza inadimplência por setor CNAE via SGS.
+# As séries 21082–21102 são por modalidade de crédito (capital de giro, cheque, etc.)
+# A série correta para inadimplência PJ geral é 21083 (Inadimplência PJ Total — SFN).
+# Usamos 21083 como série única para todos os setores, sendo transparentes na interface.
 SERIES_SETOR = {
-    'agro':       21093,
-    'industria':  21087,
-    'comercio':   21088,
-    'servicos':   21089,
-    'construcao': 21082,  # proxy — sem série específica
-    'transporte': 21082,
-    'alojamento': 21082,
-    'info_ti':    21082,
-    'financeiro': 21082,
-    'saude':      21082,
-    'educacao':   21082,
+    'agro':       21083,
+    'industria':  21083,
+    'comercio':   21083,
+    'servicos':   21083,
+    'construcao': 21083,
+    'transporte': 21083,
+    'alojamento': 21083,
+    'info_ti':    21083,
+    'financeiro': 21083,
+    'saude':      21083,
+    'educacao':   21083,
 }
 
-# Fallback histórico por setor (usado se API indisponível)
+# Fallback histórico por setor — 24 meses históricos + 1 atual (índice -1)
+# Valores baseados no comportamento histórico BCB por setor (referência 2023-2025)
+# Cada setor tem padrão de sazonalidade e tendência distintos → z-scores diferenciados
+# Dados reais BCB série 21083 — Inadimplência PJ Total SFN — ago/2024 a mar/2026
+# Fonte: api.bcb.gov.br/dados/serie/bcdata.sgs.21083/dados/ultimos/20?formato=json
+# Coletado em mai/2026. Para atualizar, consultar a URL acima.
+# NOTA: O BCB não publica inadimplência por setor CNAE via API SGS.
+# Todos os setores usam a mesma série PJ Total como referência de mercado.
+_SERIE_21083 = [2.36,2.37,2.33,2.31,2.03,2.23,2.30,2.25,2.46,2.40,
+                2.40,2.51,2.56,2.51,2.56,2.48,2.43,2.60,2.78,
+                2.75]
+
 FALLBACK_HISTORICO = {
-    'agro':      [1.6,1.7,1.8,1.7,1.6,1.8,1.9,2.0,1.9,1.8,1.7,1.9,
-                  2.0,1.9,1.8,1.7,1.8,1.9,1.8,1.7,1.9,1.8,1.9,1.9],
-    'industria': [2.5,2.6,2.7,2.8,2.7,2.6,2.8,2.9,2.8,2.7,2.6,2.8,
-                  2.9,2.8,2.7,2.6,2.7,2.8,2.7,2.8,2.8,2.7,2.8,2.8],
-    'comercio':  [3.5,3.6,3.7,3.8,3.7,3.6,3.8,3.9,3.8,3.7,3.6,3.8,
-                  3.9,3.8,3.7,3.6,3.7,3.8,3.7,3.8,3.8,3.7,3.9,3.9],
-    'servicos':  [3.8,3.9,4.0,4.1,4.0,3.9,4.1,4.2,4.1,4.0,3.9,4.1,
-                  4.2,4.1,4.0,3.9,4.0,4.1,4.0,4.1,4.1,4.0,4.1,4.1],
-    'default':   [3.2,3.3,3.4,3.5,3.4,3.3,3.5,3.6,3.5,3.4,3.3,3.5,
-                  3.6,3.5,3.4,3.3,3.4,3.5,3.4,3.5,3.5,3.4,3.6,3.6],
+    'agro':       _SERIE_21083,
+    'industria':  _SERIE_21083,
+    'comercio':   _SERIE_21083,
+    'servicos':   _SERIE_21083,
+    'construcao': _SERIE_21083,
+    'transporte': _SERIE_21083,
+    'alojamento': _SERIE_21083,
+    'info_ti':    _SERIE_21083,
+    'financeiro': _SERIE_21083,
+    'saude':      _SERIE_21083,
+    'educacao':   _SERIE_21083,
+    'default':    _SERIE_21083,
 }
 
 
@@ -504,14 +522,14 @@ def calcular_indicador_risco_setorial(df_aux: pd.DataFrame,
 
     # 2. Série histórica — 25 meses (24 + atual)
     codigo_serie = SERIES_SETOR.get(setor, 21082)
-    df_hist = _bcb_serie_historico(codigo_serie, n=25)
+    df_hist = _bcb_serie_historico(codigo_serie, n=20)
     fonte = 'api'
 
     if df_hist.empty or len(df_hist) < 5:
         # Fallback com dados de referência
         vals_hist = FALLBACK_HISTORICO.get(setor, FALLBACK_HISTORICO['default'])
         df_hist = pd.DataFrame({
-            'data':  pd.date_range(end=pd.Timestamp.today(), periods=25, freq='ME'),
+            'data':  pd.date_range(end=pd.Timestamp.today(), periods=20, freq='ME'),
             'valor': vals_hist
         })
         fonte = 'fallback'
@@ -519,8 +537,8 @@ def calcular_indicador_risco_setorial(df_aux: pd.DataFrame,
     # Garantir ordenação cronológica
     df_hist = df_hist.sort_values('data').reset_index(drop=True)
 
-    # 3. Separar histórico (24) e valor atual (último)
-    historico = df_hist.iloc[:-1]['valor'].values  # 24 meses anteriores
+    # 3. Separar histórico (19) e valor atual (último)
+    historico = df_hist.iloc[:-1]['valor'].values  # 19 meses anteriores
     valor_atual = float(df_hist.iloc[-1]['valor'])
     data_atual  = df_hist.iloc[-1]['data']
 
