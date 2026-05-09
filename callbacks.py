@@ -250,9 +250,9 @@ def register_callbacks(app):
         Input('flt-cnae',        'value'),
         Input('flt-date',        'start_date'),
         Input('flt-date',        'end_date'),
+        Input('store-raw-cart',  'data'),
         State('store-raw-aux',   'data'),
         State('store-raw-bol',   'data'),
-        State('store-raw-cart',  'data'),
         State('sl-test',  'value'),
         State('sl-trees', 'value'),
         State('sl-dup-thresh',  'value'),
@@ -262,7 +262,8 @@ def register_callbacks(app):
     def run_dashboard(run_clicks, run_upload_clicks, ml_clicks, fraud_clicks,
                       cart_clicks,
                       cnpj_q, sel_ufs, sel_cnaes, date_from, date_to,
-                      aux_json_input, bol_json, cart_json,
+                      cart_json,
+                      aux_json_input, bol_json,
                       test_size, n_trees, dup_thresh, emit_thresh):
 
         from dash.exceptions import PreventUpdate
