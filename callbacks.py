@@ -634,28 +634,80 @@ def register_callbacks(app):
         if not setor_selecionado or not aux_json or not bol_json:
             raise PreventUpdate
         try:
-            from macro import calcular_indicador_risco_setorial, SERIES_SETOR
+            from macro import SERIES_SETOR, FALLBACK_HISTORICO, _bcb_serie_historico
+            import numpy as _np
             import charts as ch
 
-            df_aux = read_json(aux_json)
-            df_bol = read_json(bol_json)
+            # Calcular ind_risco diretamente pelo setor selecionado,
+            # sem passar por identificar_setor_predominante (que ignoraria o filtro)
+            SETOR_LABEL_MAP = {
+                'agro': 'Agronegócio', 'industria': 'Indústria',
+                'comercio': 'Comércio', 'servicos': 'Serviços',
+                'construcao': 'Construção Civil', 'transporte': 'Transporte',
+                'alojamento': 'Alojamento e Alimentação', 'info_ti': 'TI e Informação',
+                'financeiro': 'Financeiro', 'saude': 'Saúde', 'educacao': 'Educação',
+            }
 
-            # Filtrar df_aux pelo setor selecionado para forçar o cálculo nele
-            from macro import CNAE_SETOR
-            from pipeline import _formatar_cnae
-            df_aux2 = df_aux.copy()
-            df_aux2['cd_cnae_fmt'] = df_aux2['cd_cnae_prin'].apply(_formatar_cnae)
-            df_aux2['_setor_tmp'] = df_aux2['cd_cnae_fmt'].apply(
-                lambda x: CNAE_SETOR.get(str(x).split('.')[0], 'servicos')
-            )
-            df_aux_filtrado = df_aux2[df_aux2['_setor_tmp'] == setor_selecionado].copy()
+            codigo_serie = SERIES_SETOR.get(setor_selecionado, 21082)
+            setor_label  = SETOR_LABEL_MAP.get(setor_selecionado, setor_selecionado.title())
 
-            if df_aux_filtrado.empty:
-                return html.Div('Sem CNPJs deste setor na carteira.',
-                                style={'color': MUTED, 'fontSize': '13px',
-                                       'textAlign': 'center', 'padding': '20px'})
+            df_hist = _bcb_serie_historico(codigo_serie, n=25)
+            fonte   = 'api'
 
-            ind_risco = calcular_indicador_risco_setorial(df_aux_filtrado, df_bol)
+            if df_hist.empty or len(df_hist) < 5:
+                import pandas as _pd
+                vals = FALLBACK_HISTORICO.get(setor_selecionado,
+                                              FALLBACK_HISTORICO['default'])
+                df_hist = _pd.DataFrame({
+                    'data':  _pd.date_range(end=_pd.Timestamp.today(),
+                                            periods=25, freq='ME'),
+                    'valor': vals,
+                })
+                fonte = 'fallback'
+
+            df_hist     = df_hist.sort_values('data').reset_index(drop=True)
+            historico   = df_hist.iloc[:-1]['valor'].values
+            valor_atual = float(df_hist.iloc[-1]['valor'])
+            data_atual  = df_hist.iloc[-1]['data']
+            media_24m   = float(_np.mean(historico))
+            desvio_24m  = float(_np.std(historico, ddof=1))
+            z = (valor_atual - media_24m) / desvio_24m if desvio_24m > 0 else 0.0
+
+            if z <= -0.5:
+                tag, cor, emoji = 'Recomendado', '#00cc70', '✅'
+                interpretacao = (
+                    f"A inadimplência do setor está {abs(z):.2f} desvios abaixo da média "
+                    f"histórica dos últimos 24 meses — momento favorável para aquisição."
+                )
+            elif z < 0.5:
+                tag, cor, emoji = 'Regular', '#F59E0B', '🔶'
+                interpretacao = (
+                    f"A inadimplência do setor está dentro da faixa histórica normal "
+                    f"(z-score: {z:+.2f}) — momento neutro para aquisição."
+                )
+            else:
+                tag, cor, emoji = 'Atenção', '#EF4444', '🚨'
+                interpretacao = (
+                    f"A inadimplência do setor está {z:.2f} desvios acima da média "
+                    f"histórica dos últimos 24 meses — momento desfavorável para aquisição."
+                )
+
+            ind_risco = {
+                'tag': tag, 'cor': cor, 'emoji': emoji,
+                'interpretacao': interpretacao,
+                'setor': setor_selecionado, 'setor_label': setor_label,
+                'codigo_serie': codigo_serie,
+                'valor_atual': round(valor_atual, 2),
+                'media_24m':   round(media_24m, 2),
+                'desvio_24m':  round(desvio_24m, 2),
+                'z_score':     round(z, 3),
+                'banda_sup':   round(media_24m + 0.5 * desvio_24m, 2),
+                'banda_inf':   round(media_24m - 0.5 * desvio_24m, 2),
+                'df_historico': df_hist,
+                'fonte': fonte,
+                'data_atual': data_atual.strftime('%b/%Y') if hasattr(data_atual, 'strftime') else str(data_atual),
+                'pct_valor': 0,
+            }
 
             def G(fig):
                 return dcc.Graph(figure=fig, config={'displayModeBar': False})
