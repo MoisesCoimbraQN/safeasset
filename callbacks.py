@@ -551,6 +551,163 @@ def register_callbacks(app):
             print(f"[SafeAsset] Erro download novos: {e}")
             raise PreventUpdate
 
+    # ── CALLBACK MACRO — popular dropdown de setores ────────────────────
+    @app.callback(
+        Output('macro-setor-filter', 'options'),
+        Output('macro-setor-filter', 'value'),
+        Input('tabs-main',       'value'),
+        State('store-raw-aux',   'data'),
+        State('store-raw-bol',   'data'),
+        prevent_initial_call=True,
+    )
+    def populate_setor_dropdown(tab_ativa, aux_json, bol_json):
+        from dash.exceptions import PreventUpdate
+        if tab_ativa != 'tab-macro' or not aux_json or not bol_json:
+            raise PreventUpdate
+        try:
+            from macro import CNAE_SETOR, SERIES_SETOR
+            from pipeline import _formatar_cnae
+            df_aux = read_json(aux_json)
+            df_bol = read_json(bol_json)
+
+            # Mapear setores presentes na carteira
+            df_aux = df_aux.copy()
+            df_aux['cd_cnae_fmt'] = df_aux['cd_cnae_prin'].apply(_formatar_cnae)
+            df_aux['setor'] = df_aux['cd_cnae_fmt'].apply(
+                lambda x: CNAE_SETOR.get(str(x).split('.')[0], 'servicos')
+            )
+
+            # Calcular valor por setor para ordenar e identificar o predominante
+            df_bol_join = df_bol.copy()
+            if 'id_pagador' in df_bol_join.columns and 'vlr_nominal' in df_bol_join.columns:
+                vlr_por_cnpj = df_bol_join.groupby('id_pagador')['vlr_nominal'].sum().reset_index()
+                vlr_por_cnpj.columns = ['id_cnpj', 'vlr']
+                df_merged = df_aux.merge(vlr_por_cnpj, on='id_cnpj', how='left')
+                df_merged['vlr'] = df_merged['vlr'].fillna(0)
+                setor_vlr = df_merged.groupby('setor')['vlr'].sum().sort_values(ascending=False)
+            else:
+                setor_vlr = df_aux['setor'].value_counts()
+
+            # Labels amigáveis
+            SETOR_LABEL = {
+                'agro':       '🌾 Agronegócio',
+                'industria':  '🏭 Indústria',
+                'comercio':   '🛒 Comércio',
+                'servicos':   '💼 Serviços',
+                'construcao': '🏗️ Construção',
+                'transporte': '🚛 Transporte',
+                'alojamento': '🏨 Alojamento & Alimentação',
+                'info_ti':    '💻 TI & Informação',
+                'financeiro': '🏦 Financeiro',
+                'saude':      '🏥 Saúde',
+                'educacao':   '📚 Educação',
+            }
+
+            options = [
+                {'label': SETOR_LABEL.get(s, s.title()), 'value': s}
+                for s in setor_vlr.index
+            ]
+            default = setor_vlr.index[0] if len(setor_vlr) > 0 else 'servicos'
+            return options, default
+        except Exception as e:
+            print(f"[SafeAsset] Erro populate_setor_dropdown: {e}")
+            raise PreventUpdate
+
+    # ── CALLBACK MACRO — atualizar indicador de risco pelo setor ─────────
+    @app.callback(
+        Output('macro-risco-setorial', 'children'),
+        Input('macro-setor-filter',  'value'),
+        State('store-raw-aux',       'data'),
+        State('store-raw-bol',       'data'),
+        prevent_initial_call=True,
+    )
+    def update_risco_setorial(setor_selecionado, aux_json, bol_json):
+        from dash.exceptions import PreventUpdate
+        if not setor_selecionado or not aux_json or not bol_json:
+            raise PreventUpdate
+        try:
+            from macro import calcular_indicador_risco_setorial, SERIES_SETOR
+            import charts as ch
+
+            df_aux = read_json(aux_json)
+            df_bol = read_json(bol_json)
+
+            # Filtrar df_aux pelo setor selecionado para forçar o cálculo nele
+            from macro import CNAE_SETOR
+            from pipeline import _formatar_cnae
+            df_aux2 = df_aux.copy()
+            df_aux2['cd_cnae_fmt'] = df_aux2['cd_cnae_prin'].apply(_formatar_cnae)
+            df_aux2['_setor_tmp'] = df_aux2['cd_cnae_fmt'].apply(
+                lambda x: CNAE_SETOR.get(str(x).split('.')[0], 'servicos')
+            )
+            df_aux_filtrado = df_aux2[df_aux2['_setor_tmp'] == setor_selecionado].copy()
+
+            if df_aux_filtrado.empty:
+                return html.Div('Sem CNPJs deste setor na carteira.',
+                                style={'color': MUTED, 'fontSize': '13px',
+                                       'textAlign': 'center', 'padding': '20px'})
+
+            ind_risco = calcular_indicador_risco_setorial(df_aux_filtrado, df_bol)
+
+            def G(fig):
+                return dcc.Graph(figure=fig, config={'displayModeBar': False})
+
+            return card([
+                dbc.Row([
+                    dbc.Col([
+                        html.Div([
+                            html.Span(ind_risco['emoji'] + '  ', style={'fontSize': '24px'}),
+                            html.Span(ind_risco['tag'],
+                                      style={'fontSize': '22px', 'fontWeight': '800',
+                                             'color': ind_risco['cor']}),
+                        ], style={'marginBottom': '8px'}),
+                        html.Div([
+                            html.Span('Setor: ', style={'color': MUTED, 'fontSize': '12px'}),
+                            html.Span(ind_risco['setor_label'],
+                                      style={'color': ind_risco['cor'],
+                                             'fontWeight': '700', 'fontSize': '14px'}),
+                            html.Span(f'  ·  Série BCB {ind_risco["codigo_serie"]}',
+                                      style={'color': MUTED, 'fontSize': '11px',
+                                             'fontStyle': 'italic'}),
+                        ], style={'marginBottom': '12px'}),
+                        html.Div(ind_risco['interpretacao'],
+                                 style={'fontSize': '13px', 'color': WHITE,
+                                        'lineHeight': '1.6', 'marginBottom': '12px'}),
+                        dbc.Row([
+                            dbc.Col(kpi('Inadimplência Atual',
+                                f'{ind_risco["valor_atual"]:.2f}%',
+                                f'Referência: {ind_risco["data_atual"]}',
+                                ind_risco['cor']), width=4),
+                            dbc.Col(kpi('Média Histórica 24m',
+                                f'{ind_risco["media_24m"]:.2f}%',
+                                'Base de comparação BCB', ACCENT), width=4),
+                            dbc.Col(kpi('Z-score',
+                                f'{ind_risco["z_score"]:+.2f}σ',
+                                'Faixa Regular: ±0.5σ', AMBER), width=4),
+                        ], className='g-2'),
+                        *([html.Div(
+                            '📋 Nota BCB (Set/2025): cerca de 70% do aumento da inadimplência '
+                            'desde jan/2025 é metodológico (novas regras contábeis), '
+                            'não deterioração real do crédito.',
+                            style={'fontSize': '11px', 'color': '#c8a84b',
+                                   'fontStyle': 'italic', 'marginTop': '10px'})]
+                        if ind_risco.get('z_score', 0) > 0 else []),
+                    ], width=5),
+                    dbc.Col([
+                        html.Div('Série Histórica — Inadimplência PJ do Setor',
+                                 style={'fontSize': '12px', 'color': MUTED,
+                                        'marginBottom': '6px'}),
+                        G(ch.fig_risco_setorial(ind_risco)),
+                    ], width=7),
+                ], className='g-3'),
+            ])
+
+        except Exception as e:
+            import traceback
+            print(f"[SafeAsset] Erro update_risco_setorial: {e}")
+            return html.Div(f'Erro ao calcular indicador: {e}',
+                            style={'color': WARN, 'fontSize': '12px', 'padding': '12px'})
+
     # ── CALLBACK MACRO — dispara quando aba é aberta ou store muda ──────
     @app.callback(
         Output('macro-content', 'children'),
@@ -660,88 +817,6 @@ def register_callbacks(app):
                 html.Div(f'Dados: {coleta}  ·  Origem: {fonte}',
                          style={'fontSize': '11px', 'color': MUTED,
                                 'marginBottom': '16px', 'fontStyle': 'italic'}),
-
-                # ── Indicador de Risco Setorial ───────────────────────────
-                *([
-                    card([
-                        html.Div('Indicador de Risco Setorial',
-                                 style={'fontSize': '16px', 'fontWeight': '700',
-                                        'color': WHITE, 'marginBottom': '8px'}),
-                        # Destaque do setor analisado
-                        html.Div([
-                            html.Span('🏭 Setor analisado: ',
-                                      style={'fontSize': '12px', 'color': MUTED,
-                                             'fontWeight': '600'}),
-                            html.Span(ind_risco['setor_label'],
-                                      style={'fontSize': '14px', 'fontWeight': '800',
-                                             'color': ind_risco['cor']}),
-                            html.Span(f'  ·  {ind_risco["pct_valor"]:.1f}% do valor total da carteira',
-                                      style={'fontSize': '12px', 'color': MUTED}),
-                            html.Span(f'  ·  Série BCB {ind_risco["codigo_serie"]}',
-                                      style={'fontSize': '11px', 'color': MUTED,
-                                             'fontStyle': 'italic'}),
-                        ], style={
-                            'background': '#0a1e30',
-                            'border': f'2px solid {ind_risco["cor"]}',
-                            'borderRadius': '8px',
-                            'padding': '10px 16px',
-                            'marginBottom': '16px',
-                            'display': 'flex',
-                            'alignItems': 'center',
-                            'gap': '4px',
-                            'flexWrap': 'wrap',
-                        }),
-
-                        dbc.Row([
-                            dbc.Col([
-                                # Tag principal
-                                html.Div([
-                                    html.Span(ind_risco['emoji'] + '  ',
-                                              style={'fontSize': '24px'}),
-                                    html.Span(ind_risco['tag'],
-                                              style={'fontSize': '22px', 'fontWeight': '800',
-                                                     'color': ind_risco['cor']}),
-                                ], style={'marginBottom': '12px'}),
-                                html.Div(ind_risco['interpretacao'],
-                                         style={'fontSize': '13px', 'color': WHITE,
-                                                'lineHeight': '1.6', 'marginBottom': '12px'}),
-                                dbc.Row([
-                                    dbc.Col(kpi('Inadimplência Atual',
-                                        f'{ind_risco["valor_atual"]:.2f}%',
-                                        f'Referência: {ind_risco["data_atual"]}',
-                                        ind_risco['cor']), width=4),
-                                    dbc.Col(kpi('Média Histórica 24m',
-                                        f'{ind_risco["media_24m"]:.2f}%',
-                                        'Base de comparação BCB',
-                                        ACCENT), width=4),
-                                    dbc.Col(kpi('Z-score',
-                                        f'{ind_risco["z_score"]:+.2f}σ',
-                                        f'Faixa Regular: ±0.5σ',
-                                        AMBER), width=4),
-                                ], className='g-2'),
-                                # Nota regulatória BCB — após KPIs, sem caixa
-                                *([html.Div(
-                                    '📋 Nota BCB (Set/2025): cerca de 70% do aumento da inadimplência '
-                                    'desde jan/2025 é metodológico (novas regras contábeis de '
-                                    'instrumentos financeiros), não deterioração real do crédito.',
-                                    style={'fontSize': '11px', 'color': '#c8a84b',
-                                           'fontStyle': 'italic', 'marginTop': '10px'})]
-                                if ind_risco.get('z_score', 0) > 0 else []),
-                            ], width=5),
-                            dbc.Col([
-                                html.Div('Série Histórica — Inadimplência PJ do Setor',
-                                         style={'fontSize': '12px', 'color': MUTED,
-                                                'marginBottom': '6px'}),
-                                G(ch.fig_risco_setorial(ind_risco)),
-                            ], width=7),
-                        ], className='g-3'),
-                    ]),
-                ] if ind_risco else [
-                    html.Div('Indicador de Risco Setorial não disponível.',
-                             style={'color': MUTED, 'fontSize': '13px', 'padding': '12px'}),
-                ]),
-
-                html.Hr(style={'borderColor': BORDER, 'margin': '8px 0 20px'}),
 
                 # KPIs
                 dbc.Row([
@@ -1685,6 +1760,42 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
               children=[html.Div(style={'padding': '24px'}, children=[
                 section_title('Contexto Macroeconômico — Camada 1',
                     'Fontes: BCB SGS · IBGE SIDRA · Dados buscados automaticamente no upload'),
+
+                # ── Filtro de setor ────────────────────────────────────────
+                html.Div([
+                    html.Div('🏭 Indicador de Risco por Setor', style={
+                        'fontSize': '13px', 'fontWeight': '600',
+                        'color': WHITE, 'marginBottom': '8px',
+                    }),
+                    html.Div([
+                        html.Span('Setor analisado:', style={
+                            'fontSize': '12px', 'color': MUTED,
+                            'marginRight': '10px', 'lineHeight': '36px',
+                        }),
+                        dcc.Dropdown(
+                            id='macro-setor-filter',
+                            placeholder='Selecione um setor para analisar...',
+                            clearable=False,
+                            style={'width': '380px', 'fontFamily': "'Space Grotesk', sans-serif",
+                                   'fontSize': '13px'},
+                            className='dark-dropdown',
+                        ),
+                    ], style={'display': 'flex', 'alignItems': 'center', 'gap': '8px'}),
+                ], style={
+                    'background': '#0c1e35', 'border': '1px solid #185FA5',
+                    'borderRadius': '10px', 'padding': '14px 20px', 'marginBottom': '16px',
+                }),
+
+                # ── Indicador de Risco Setorial (atualizado pelo filtro) ──
+                html.Div(id='macro-risco-setorial',
+                    children=html.Div('Selecione um setor acima para ver o indicador.',
+                        style={'color': MUTED, 'fontSize': '13px',
+                               'textAlign': 'center', 'padding': '20px'})
+                ),
+
+                html.Hr(style={'borderColor': BORDER, 'margin': '8px 0 20px'}),
+
+                # ── KPIs, scores e tabela setorial ────────────────────────
                 html.Div(id='macro-content',
                     children=html.Div(
                         '🌐 Faça o upload dos dois arquivos CSV para carregar os dados macroeconômicos.',
