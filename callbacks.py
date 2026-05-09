@@ -589,6 +589,8 @@ def register_callbacks(app):
                 setor_vlr = df_aux['setor'].value_counts()
 
             # Labels amigáveis
+            # Setores com série BCB própria vs proxy (Total PJ 21082)
+            SETORES_SERIE_PROPRIA = {'agro', 'industria', 'comercio', 'servicos'}
             SETOR_LABEL = {
                 'agro':       '🌾 Agronegócio',
                 'industria':  '🏭 Indústria',
@@ -604,7 +606,13 @@ def register_callbacks(app):
             }
 
             options = [
-                {'label': SETOR_LABEL.get(s, s.title()), 'value': s}
+                {
+                    'label': SETOR_LABEL.get(s, s.title()) + (
+                        '' if s in SETORES_SERIE_PROPRIA
+                        else ' ★ proxy: Total PJ'
+                    ),
+                    'value': s,
+                }
                 for s in setor_vlr.index
             ]
             default = setor_vlr.index[0] if len(setor_vlr) > 0 else 'servicos'
@@ -652,7 +660,23 @@ def register_callbacks(app):
             def G(fig):
                 return dcc.Graph(figure=fig, config={'displayModeBar': False})
 
+            SETORES_SERIE_PROPRIA = {'agro', 'industria', 'comercio', 'servicos'}
+            is_proxy = setor_selecionado not in SETORES_SERIE_PROPRIA
+
             return card([
+                # Nota de proxy quando o setor não tem série BCB própria
+                *([html.Div([
+                    html.Span('★ ', style={'color': AMBER, 'fontWeight': '700'}),
+                    html.Span(
+                        'Este setor não possui série BCB própria de inadimplência. '
+                        'O indicador usa como proxy a série Total PJ (BCB 21082), '
+                        'que representa a média de todos os setores. '
+                        'Interprete com cautela.',
+                        style={'fontSize': '11px', 'color': AMBER, 'fontStyle': 'italic'}),
+                ], style={
+                    'background': '#1a1400', 'border': f'1px solid {AMBER}',
+                    'borderRadius': '8px', 'padding': '8px 14px', 'marginBottom': '14px',
+                })] if is_proxy else []),
                 dbc.Row([
                     dbc.Col([
                         html.Div([
@@ -1510,6 +1534,58 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                     ])] if _novos_rec_label else [
                         html.Div('✅ Todos os CNPJs da carteira possuem histórico PCR.',
                                  style={'color': ACCENT2, 'fontSize': '12px', 'padding': '8px 0'}),
+                    ]),
+
+                    # ── Recomendação Automática — Carteira Nova ───────────
+                    html.Div(style={
+                        'background': '#0a1e0e', 'border': f'1px solid #3B6D11',
+                        'borderLeft': '4px solid #97C459',
+                        'borderRadius': '10px', 'padding': '16px 20px', 'marginTop': '16px',
+                    }, children=[
+                        html.Div('📌 Recomendação Automática — Carteira Nova',
+                                 style={'fontSize': '13px', 'fontWeight': '700',
+                                        'color': '#97C459', 'marginBottom': '10px'}),
+                        html.Div([
+                            # CNPJs com histórico
+                            *([html.Span(
+                                f'A carteira nova contém {cob["total_cnpjs"]:,} CNPJs no total. '
+                            )] if cob.get('total_cnpjs') else []),
+                            *([html.Span(
+                                f'{cob["com_historico"]:,} CNPJs ({cob["pct_com_historico"]:.1f}%) '
+                                f'possuem histórico PCR e foram avaliados pelo modelo — '
+                            )] if cob.get('com_historico') else []),
+                            *([html.Span(
+                                f'destes, {_cart_rec_label.replace("  ", " ")} '
+                                f'com score médio de {_cart_score_med:.0f}/1000, '
+                                f'{_cart_pct_ab:.0f}% rating A ou B '
+                                f'e {_cart_pct_fraude:.1f}% com flag de fraude. '
+                            )] if _cart_rec_label else []),
+                            # CNPJs novos
+                            *([html.Span(
+                                f'{cob["sem_historico"]:,} CNPJs ({cob["pct_sem_historico"]:.1f}%) '
+                                f'não possuem histórico PCR — representam R$ {_novos_vlr:,.0f} '
+                                f'({_novos_vlr_pct:.1f}% do valor total). '
+                            )] if cob.get('sem_historico', 0) > 0 else [
+                                html.Span('Todos os CNPJs da carteira possuem histórico PCR. ')
+                            ]),
+                            # Fraude novos
+                            *([html.Span(
+                                f'{_novos_fraude} CNPJs novos apresentam alerta de fraude nos boletos — '
+                                'análise obrigatória antes da aquisição. ',
+                                style={'color': WARN}
+                            )] if _novos_fraude > 0 else []),
+                            # Macro
+                            *([html.Span(
+                                f'Contexto macroeconômico do setor predominante: '
+                                f'{R["ind_risco"]["emoji"]} {R["ind_risco"]["tag"]} '
+                                f'({R["ind_risco"]["setor_label"]}). '
+                            )] if R.get('ind_risco') else []),
+                            # Ação recomendada
+                            html.Span(
+                                'Acesse as abas [A] ⚠️ Novos e [A] ✅ Histórico para análise detalhada.',
+                                style={'color': '#97C459', 'fontStyle': 'italic'}
+                            ),
+                        ], style={'fontSize': '13px', 'color': WHITE, 'lineHeight': '1.9'}),
                     ]),
 
                 ])] if R.get('cobertura') else []),
