@@ -194,6 +194,7 @@ def register_callbacks(app):
                 'pib':         macro_dados['pib'],
                 'data_coleta': macro_dados['data_coleta'],
                 'fonte':       macro_dados['fonte'],
+                'ind_risco':   None,  # calculado no run_dashboard com df_bol filtrado
             })
         except Exception as e:
             # Mesmo com erro, retorna fallback para a aba Macro exibir algo
@@ -206,6 +207,7 @@ def register_callbacks(app):
                         'pib_variacao_trimestral': FALLBACK['pib_variacao_trimestral']},
                 'data_coleta': FALLBACK['data_referencia'],
                 'fonte': 'fallback',
+                'ind_risco': None,
             })
 
     # ── Popular filtros UF/CNAE após upload ───────────────────────────────
@@ -357,9 +359,13 @@ def register_callbacks(app):
             R['df_carteira'] = None
 
         # ── Calcular Indicador de Risco Setorial ──────────────────────────
+        # Usa df_bol_original (sem filtros de data/UF) para garantir z-score
+        # idêntico ao calculado no update_macro_content
         try:
             from macro import calcular_indicador_risco_setorial
-            R['ind_risco'] = calcular_indicador_risco_setorial(df_aux, df_bol)
+            _df_bol_orig = read_json(bol_json)   # sem filtros aplicados
+            _df_aux_orig = read_json(aux_json_input)  # sem filtros aplicados
+            R['ind_risco'] = calcular_indicador_risco_setorial(_df_aux_orig, _df_bol_orig)
             print(f"[SafeAsset] ind_risco: {R['ind_risco']['tag']} — {R['ind_risco']['setor_label']}")
         except Exception as _e:
             print(f"[SafeAsset] ind_risco erro: {_e}")
@@ -635,14 +641,8 @@ def register_callbacks(app):
                 lambda s: calcular_score_macro_setor(ind, s, p25=_p25, p75=_p75)['nivel']
             )
 
-            # Calcular Indicador de Risco Setorial
+            # Indicador de Risco calculado abaixo via _ind_risco_macro
             df_bol = read_json(bol_json)
-            from macro import calcular_indicador_risco_setorial
-            try:
-                ind_risco = calcular_indicador_risco_setorial(df_aux, df_bol)
-            except Exception as _e:
-                print(f"[SafeAsset] Erro ind_risco: {_e}")
-                ind_risco = None
 
             def G(fig):
                 return dcc.Graph(figure=fig, config={'displayModeBar': False})
@@ -693,10 +693,14 @@ def register_callbacks(app):
 
             print('[SafeAsset] Macro content montado com sucesso')
 
-            # ── Indicador de Risco PJ ─────────────────────────────────────
+            # ── Indicador de Risco PJ — mesmo cálculo do run_dashboard ──────
+            # Usa os mesmos dados (df_aux sem filtros, df_bol original) para
+            # garantir z-score idêntico ao exibido no Resumo
             _ind_risco_macro = None
             try:
                 from macro import calcular_indicador_risco_setorial
+                # df_aux e df_bol aqui são os originais (sem filtros de CNPJ/UF/data)
+                # igual ao que run_dashboard usa para R['ind_risco']
                 _ind_risco_macro = calcular_indicador_risco_setorial(df_aux, df_bol)
             except Exception as _e:
                 print(f"[SafeAsset] ind_risco macro: {_e}")
