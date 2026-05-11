@@ -31,7 +31,7 @@ warnings.filterwarnings('ignore')
 BCB_BASE  = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.{codigo}/dados/ultimos/{n}?formato=json"
 IBGE_BASE = "https://servicodados.ibge.gov.br/api/v3/agregados/{ag}/periodos/last%20{n}/variaveis/{var}?localidades=N1[all]"
 
-TIMEOUT = 8  # segundos por requisição
+TIMEOUT = 4  # segundos por requisição
 
 # Mapeamento CNAE divisão (2 dígitos) → setor macro BCB/IBGE
 # Baseado na classificação de atividades do BCB para crédito PJ

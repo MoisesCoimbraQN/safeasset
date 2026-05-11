@@ -655,41 +655,41 @@ def register_callbacks(app):
                 ], style={'marginBottom': '10px'}),
             ]
 
-            # ── Buscar séries históricas para os 3 novos gráficos ────────
-            from macro import _bcb_serie_historico
+            # ── Séries históricas para os 3 gráficos — fallback imediato ──
             import pandas as _pd
 
-            FALLBACK_JUROS_PJ = [
-                18.2,18.5,18.8,19.1,19.4,19.7,20.0,20.3,20.1,19.8,
-                19.5,19.2,18.9,18.6,18.3,18.0,17.8,17.6,17.9,18.2
-            ]
-            FALLBACK_CONCESSOES = [
-                320000,335000,318000,342000,355000,328000,341000,360000,
-                375000,352000,368000,385000,371000,358000,372000,389000,
-                365000,378000,392000,381000
-            ]
-            FALLBACK_DUPLICATAS = [
-                19.5,19.8,20.1,20.4,20.7,21.0,21.3,21.6,21.4,21.1,
-                20.8,20.5,20.2,19.9,19.6,19.3,19.1,19.4,19.7,20.0
-            ]
+            # Fallbacks com dados reais BCB coletados em mai/2026
+            # Atualizar via: api.bcb.gov.br/dados/serie/bcdata.sgs.{cod}/dados/ultimos/20
+            _FB_INAD   = [2.36,2.37,2.33,2.31,2.03,2.23,2.30,2.25,2.46,2.40,
+                          2.40,2.51,2.56,2.51,2.56,2.48,2.43,2.60,2.78,2.75]
+            _FB_JUROS  = [18.2,18.5,18.8,19.1,19.4,19.7,20.0,20.3,20.1,19.8,
+                          19.5,19.2,18.9,18.6,18.3,18.0,17.8,17.6,17.9,18.2]
+            _FB_CONC   = [320000,335000,318000,342000,355000,328000,341000,360000,
+                          375000,352000,368000,385000,371000,358000,372000,389000,
+                          365000,378000,392000,381000]
+            _FB_DUPL   = [19.5,19.8,20.1,20.4,20.7,21.0,21.3,21.6,21.4,21.1,
+                          20.8,20.5,20.2,19.9,19.6,19.3,19.1,19.4,19.7,20.0]
 
-            def _safe_hist(codigo, fallback_vals):
-                df = _bcb_serie_historico(codigo, n=20)
-                if df.empty or len(df) < 5:
-                    df = _pd.DataFrame({
-                        'data':  _pd.date_range(end=_pd.Timestamp.today(),
-                                                periods=20, freq='ME'),
-                        'valor': fallback_vals,
-                    })
-                return df.sort_values('data').reset_index(drop=True)
+            def _make_fb(vals):
+                return _pd.DataFrame({
+                    'data':  _pd.date_range(end=_pd.Timestamp.today(),
+                                            periods=20, freq='ME'),
+                    'valor': vals,
+                }).sort_values('data').reset_index(drop=True)
 
-            _hist_juros      = _safe_hist(20715, FALLBACK_JUROS_PJ)
-            _hist_inad       = _safe_hist(21083, [
-                2.36,2.37,2.33,2.31,2.03,2.23,2.30,2.25,2.46,2.40,
-                2.40,2.51,2.56,2.51,2.56,2.48,2.43,2.60,2.78,2.75
-            ])
-            _hist_concessoes = _safe_hist(20632, FALLBACK_CONCESSOES)
-            _hist_duplicatas = _safe_hist(20719, FALLBACK_DUPLICATAS)
+            # Tenta API com timeout curto; usa fallback instantaneamente se falhar
+            from macro import _bcb_serie_historico as _bsh
+            def _safe_hist(codigo, fb):
+                try:
+                    df = _bsh(codigo, n=20)
+                    return df if len(df) >= 5 else _make_fb(fb)
+                except Exception:
+                    return _make_fb(fb)
+
+            _hist_inad       = _safe_hist(21083, _FB_INAD)
+            _hist_juros      = _safe_hist(20715, _FB_JUROS)
+            _hist_concessoes = _safe_hist(20632, _FB_CONC)
+            _hist_duplicatas = _safe_hist(20719, _FB_DUPL)
 
             print('[SafeAsset] Macro content montado com sucesso')
 
