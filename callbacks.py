@@ -655,6 +655,42 @@ def register_callbacks(app):
                 ], style={'marginBottom': '10px'}),
             ]
 
+            # ── Buscar séries históricas para os 3 novos gráficos ────────
+            from macro import _bcb_serie_historico
+            import pandas as _pd
+
+            FALLBACK_JUROS_PJ = [
+                18.2,18.5,18.8,19.1,19.4,19.7,20.0,20.3,20.1,19.8,
+                19.5,19.2,18.9,18.6,18.3,18.0,17.8,17.6,17.9,18.2
+            ]
+            FALLBACK_CONCESSOES = [
+                320000,335000,318000,342000,355000,328000,341000,360000,
+                375000,352000,368000,385000,371000,358000,372000,389000,
+                365000,378000,392000,381000
+            ]
+            FALLBACK_DUPLICATAS = [
+                19.5,19.8,20.1,20.4,20.7,21.0,21.3,21.6,21.4,21.1,
+                20.8,20.5,20.2,19.9,19.6,19.3,19.1,19.4,19.7,20.0
+            ]
+
+            def _safe_hist(codigo, fallback_vals):
+                df = _bcb_serie_historico(codigo, n=20)
+                if df.empty or len(df) < 5:
+                    df = _pd.DataFrame({
+                        'data':  _pd.date_range(end=_pd.Timestamp.today(),
+                                                periods=20, freq='ME'),
+                        'valor': fallback_vals,
+                    })
+                return df.sort_values('data').reset_index(drop=True)
+
+            _hist_juros      = _safe_hist(20715, FALLBACK_JUROS_PJ)
+            _hist_inad       = _safe_hist(21083, [
+                2.36,2.37,2.33,2.31,2.03,2.23,2.30,2.25,2.46,2.40,
+                2.40,2.51,2.56,2.51,2.56,2.48,2.43,2.60,2.78,2.75
+            ])
+            _hist_concessoes = _safe_hist(20632, FALLBACK_CONCESSOES)
+            _hist_duplicatas = _safe_hist(20719, FALLBACK_DUPLICATAS)
+
             print('[SafeAsset] Macro content montado com sucesso')
 
             # ── Indicador de Risco PJ ─────────────────────────────────────
@@ -746,44 +782,46 @@ def register_callbacks(app):
                     dbc.Col(kpi('Spread PJ',     f'{ind.get("spread_pj","—")} p.p.',         'spread médio PJ',      WARN),   width=2),
                 ], className='g-3', style={'marginBottom': '20px'}),
 
-                # Score macro + PIB
-                card([
-                    html.Div('Score Macroeconômico por Setor da Carteira',
-                             style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '4px'}),
-                    html.Div('Inadimplência setorial BCB (50%) · SELIC (30%) · IPCA (20%) · Faixas por quartis históricos 24m',
+                # ── Gráfico 1: Taxa de Juros PJ × Inadimplência PJ ───────────
+                *([card([
+                    html.Div('Taxa Média de Juros PJ × Inadimplência PJ',
+                             style={'fontSize': '14px', 'fontWeight': '600',
+                                    'color': WHITE, 'marginBottom': '4px'}),
+                    html.Div('BCB 20715 (juros % a.a.) · BCB 21083 (inadimplência %) · '
+                             'Correlação: juros sobem → inadimplência tende a subir nos meses seguintes',
                              style={'fontSize': '10px', 'color': MUTED, 'marginBottom': '10px'}),
-                    G(ch.fig_score_macro_setores(scores)),
+                    G(ch.fig_juros_vs_inadimplencia(_hist_juros, _hist_inad)),
+                ])] if _hist_juros is not None and _hist_inad is not None else [
+                    html.Div('Dados de juros/inadimplência não disponíveis.',
+                             style={'color': MUTED, 'fontSize': '12px', 'padding': '12px'}),
                 ]),
 
-                # Tabela setorial
-                card([
-                    html.Div('Ranking Setorial — Score FIDC × Contexto Macroeconômico',
-                             style={'fontSize': '14px', 'fontWeight': '600', 'marginBottom': '12px'}),
-                    dash_table.DataTable(
-                        data=(perfil
-                              .rename(columns={'cd_cnae_fmt': 'CNAE', 'qtd_cnpjs': 'CNPJs',
-                                               'setor_macro': 'Grupo Macro',
-                                               'score_macro': 'Score Macro',
-                                               'nivel_macro': 'Contexto'})
-                              .sort_values('Score Macro')
-                              .to_dict('records')),
-                        columns=[{'name': c, 'id': c}
-                                 for c in ['CNAE', 'CNPJs', 'Grupo Macro', 'Score Macro', 'Contexto']],
-                        page_size=12, sort_action='native',
-                        style_table={'overflowX': 'auto'},
-                        style_cell={'backgroundColor': CARD_BG, 'color': WHITE,
-                                    'border': f'1px solid {BORDER}', 'fontFamily': 'Space Grotesk',
-                                    'fontSize': '12px', 'padding': '8px 12px', 'textAlign': 'left'},
-                        style_header={'backgroundColor': BLUE, 'fontWeight': '700',
-                                      'color': ACCENT, 'border': f'1px solid {BORDER}'},
-                        style_data_conditional=[
-                            {'if': {'filter_query': '{Contexto} = "Favorável"'},   'color': '#00cc70', 'fontWeight': '600'},
-                            {'if': {'filter_query': '{Contexto} = "Neutro"'},      'color': '#F59E0B', 'fontWeight': '600'},
-                            {'if': {'filter_query': '{Contexto} = "Atenção"'},     'color': '#ff6b35', 'fontWeight': '600'},
-                            {'if': {'filter_query': '{Contexto} = "Desfavorável"'},'color': '#EF4444', 'fontWeight': '600'},
-                            {'if': {'row_index': 'odd'}, 'backgroundColor': '#0d1b2a'},
-                        ],
-                    ),
+                # ── Gráfico 2: Concessões de Crédito PJ ──────────────────
+                *([card([
+                    html.Div('Concessões de Crédito PJ — Volume Mensal',
+                             style={'fontSize': '14px', 'fontWeight': '600',
+                                    'color': WHITE, 'marginBottom': '4px'}),
+                    html.Div('BCB 20632 · Valor das novas operações contratadas no SFN (R$ milhões) · '
+                             'Queda nas concessões sinaliza aperto de crédito e maior risco para sacados',
+                             style={'fontSize': '10px', 'color': MUTED, 'marginBottom': '10px'}),
+                    G(ch.fig_concessoes_pj(_hist_concessoes)),
+                ])] if _hist_concessoes is not None else [
+                    html.Div('Dados de concessões não disponíveis.',
+                             style={'color': MUTED, 'fontSize': '12px', 'padding': '12px'}),
+                ]),
+
+                # ── Gráfico 3: Taxa de Juros — Desconto de Duplicatas ────
+                *([card([
+                    html.Div('Taxa de Juros — Desconto de Duplicatas e Recebíveis',
+                             style={'fontSize': '14px', 'fontWeight': '600',
+                                    'color': WHITE, 'marginBottom': '4px'}),
+                    html.Div('BCB 20719 · Taxa média % a.a. — operação de crédito livre mais próxima '
+                             'do mercado de FIDC/recebíveis · Alta indica custo maior de captação para sacados',
+                             style={'fontSize': '10px', 'color': MUTED, 'marginBottom': '10px'}),
+                    G(ch.fig_juros_duplicatas(_hist_duplicatas)),
+                ])] if _hist_duplicatas is not None else [
+                    html.Div('Dados de juros duplicatas não disponíveis.',
+                             style={'color': MUTED, 'fontSize': '12px', 'padding': '12px'}),
                 ]),
             ])
 

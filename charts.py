@@ -990,3 +990,106 @@ def fig_top10_valor(df: pd.DataFrame) -> go.Figure:
                 margin=dict(l=120, r=60, t=20, b=40),
                 xaxis_title='Valor na Carteira (R$)',
                 yaxis_title='CNPJ')
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GRÁFICOS MACROECONÔMICOS — séries BCB confirmadas
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fig_juros_vs_inadimplencia(df_juros: 'pd.DataFrame', df_inad: 'pd.DataFrame') -> 'go.Figure':
+    """
+    Gráfico dual-axis: Taxa média de juros PJ (BCB 20715) × Inadimplência PJ (BCB 21083).
+    Eixo esquerdo: juros (% a.a.) | Eixo direito: inadimplência (%)
+    """
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=df_juros['data'], y=df_juros['valor'],
+        name='Juros PJ (% a.a.) — BCB 20715',
+        line=dict(color=WARN, width=2),
+        yaxis='y1',
+    ))
+    fig.add_trace(go.Scatter(
+        x=df_inad['data'], y=df_inad['valor'],
+        name='Inadimplência PJ (%) — BCB 21083',
+        line=dict(color=ACCENT2, width=2, dash='dot'),
+        yaxis='y2',
+    ))
+
+    fig.update_layout(
+        yaxis=dict(title='Juros % a.a.', color=WARN,
+                   gridcolor=BORDER, tickfont=dict(color=WARN)),
+        yaxis2=dict(title='Inadimplência %', color=ACCENT2,
+                    overlaying='y', side='right',
+                    gridcolor='rgba(0,0,0,0)', tickfont=dict(color=ACCENT2)),
+        legend=dict(orientation='h', y=1.08, x=0),
+        hovermode='x unified',
+    )
+    return _fig(fig, height=320, margin=dict(l=60, r=60, t=40, b=40))
+
+
+def fig_concessoes_pj(df: 'pd.DataFrame') -> 'go.Figure':
+    """
+    Histórico de concessões de crédito PJ (BCB 20632) — R$ milhões.
+    Barra + linha de tendência simples.
+    """
+    import numpy as _np
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Bar(
+        x=df['data'], y=df['valor'],
+        name='Concessões PJ (R$ mi)',
+        marker_color=ACCENT,
+        opacity=0.75,
+    ))
+
+    # Linha de média móvel 3m
+    if len(df) >= 3:
+        mm3 = df['valor'].rolling(3).mean()
+        fig.add_trace(go.Scatter(
+            x=df['data'], y=mm3,
+            name='Média 3m',
+            line=dict(color=ACCENT2, width=2),
+        ))
+
+    fig.update_layout(
+        yaxis=dict(title='R$ milhões', gridcolor=BORDER),
+        legend=dict(orientation='h', y=1.08, x=0),
+        hovermode='x unified',
+        bargap=0.2,
+    )
+    return _fig(fig, height=320, margin=dict(l=60, r=40, t=40, b=40))
+
+
+def fig_juros_duplicatas(df: 'pd.DataFrame') -> 'go.Figure':
+    """
+    Taxa média de juros PJ — Desconto de duplicatas e recebíveis (BCB 20719).
+    Linha com área sombreada.
+    """
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=df['data'], y=df['valor'],
+        name='Juros Duplicatas (% a.a.) — BCB 20719',
+        line=dict(color='#a78bfa', width=2),
+        fill='tozeroy',
+        fillcolor='rgba(167,139,250,0.1)',
+    ))
+
+    # Linha de média histórica
+    media = df['valor'].mean()
+    fig.add_hline(
+        y=media,
+        line_dash='dash',
+        line_color=MUTED,
+        annotation_text=f'Média {media:.1f}%',
+        annotation_font_color=MUTED,
+        annotation_font_size=10,
+    )
+
+    fig.update_layout(
+        yaxis=dict(title='% a.a.', gridcolor=BORDER),
+        legend=dict(orientation='h', y=1.08, x=0),
+        hovermode='x unified',
+    )
+    return _fig(fig, height=320, margin=dict(l=60, r=40, t=40, b=40))
