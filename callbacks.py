@@ -736,7 +736,7 @@ def register_callbacks(app):
                                     ir['cor']), width=4),
                                 dbc.Col(kpi('Média Histórica 19m',
                                     f'{ir["media_24m"]:.2f}%',
-                                    'Base de comparação BCB 21083', ACCENT), width=4),
+                                    'Inadimplência PJ — BCB 21083', ACCENT), width=4),
                                 dbc.Col(kpi('Z-score',
                                     f'{ir["z_score"]:+.2f}σ',
                                     'Faixa Regular: ±0.5σ', AMBER), width=4),
@@ -951,9 +951,9 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
     _notas = []
     if _macro_tag == 'Atenção' and _rec_tag == 'Recomendado':
         _notas.append(
-            '⚠️ Macro: Recomendação mantida pelos indicadores dos sacados, mas o contexto '
-            'macroeconômico do setor está desfavorável. Recomenda-se análise dos indicadores '
-            'macro por um especialista antes da aquisição.'
+            '⚠️ Macro: Recomendação mantida pelos indicadores dos sacados, mas a inadimplência '
+            'PJ geral está acima da média histórica dos últimos 19 meses. '
+            'Recomenda-se análise do contexto macroeconômico antes da aquisição.'
         )
     if _pct_diverg > 5:
         _notas.append(
@@ -1298,13 +1298,13 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                         ], width=7),
                         dbc.Col([
                             dbc.Row([
-                                dbc.Col(kpi('Setor',
+                                dbc.Col(kpi('Setor Predominante',
                                     (R.get('ind_risco') or {}).get('setor_label','—'),
-                                    f'{(R.get("ind_risco") or {}).get("pct_valor",0):.1f}% do valor',
+                                    f'{(R.get("ind_risco") or {}).get("pct_valor",0):.1f}% do valor · inadimp. é PJ geral',
                                     ACCENT), width=6),
                                 dbc.Col(kpi('Inadimp. Atual',
                                     f'{(R.get("ind_risco") or {}).get("valor_atual",0):.2f}%',
-                                    f'Média 24m: {(R.get("ind_risco") or {}).get("media_24m",0):.2f}%',
+                                    f'Média 19m: {(R.get("ind_risco") or {}).get("media_24m",0):.2f}%',
                                     (R.get('ind_risco') or {}).get('cor', ACCENT)), width=6),
                             ], className='g-2'),
                         ], width=5),
@@ -1508,9 +1508,9 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                             )] if _novos_fraude > 0 else []),
                             # Macro
                             *([html.Span(
-                                f'Contexto macroeconômico do setor predominante: '
+                                f'Inadimplência PJ geral (BCB 21083): '
                                 f'{R["ind_risco"]["emoji"]} {R["ind_risco"]["tag"]} '
-                                f'({R["ind_risco"]["setor_label"]}). '
+                                f'— setor predominante da carteira: {R["ind_risco"]["setor_label"]}. '
                             )] if R.get('ind_risco') else []),
                             # Ação recomendada
                             html.Span(
@@ -1951,14 +1951,14 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                                         'borderLeft': f'4px solid {ACCENT}',
                                         'paddingLeft': '10px'}),
                         html.Div(
-                            f'Indicador de Risco Setorial para os CNPJs novos: '
+                            f'Indicador de Inadimplência PJ geral (BCB 21083) — setor predominante: '
                             f'{R["ind_risco"]["emoji"]}  {R["ind_risco"]["tag"]} — '
                             f'Setor {R["ind_risco"]["setor_label"]} · '
                             f'Inadimplência atual {R["ind_risco"]["valor_atual"]:.2f}% '
                             f'vs média histórica {R["ind_risco"]["media_24m"]:.2f}%',
                             style={'fontSize': '12px', 'color': WHITE}),
                         html.Div(
-                            'O risco macroeconômico do setor se aplica também aos CNPJs novos — '
+                            'O indicador de inadimplência PJ geral se aplica também aos CNPJs novos — '
                             'contexto adicional para a decisão de aquisição.',
                             style={'fontSize': '11px', 'color': MUTED, 'marginTop': '8px',
                                    'fontStyle': 'italic'}),

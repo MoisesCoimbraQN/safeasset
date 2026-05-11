@@ -404,7 +404,7 @@ def enriquecer_perfil_com_macro(perfil_cnae: pd.DataFrame,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# INDICADOR DE RISCO SETORIAL — z-score histórico 24 meses
+# INDICADOR DE INADIMPLÊNCIA PJ — z-score histórico 19 meses (BCB 21083)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Séries BCB por setor macro
@@ -426,7 +426,7 @@ SERIES_SETOR = {
     'educacao':   21083,
 }
 
-# Fallback histórico por setor — 24 meses históricos + 1 atual (índice -1)
+# Fallback histórico — 19 meses históricos + 1 atual (índice 19) — BCB 21083
 # Valores baseados no comportamento histórico BCB por setor (referência 2023-2025)
 # Cada setor tem padrão de sazonalidade e tendência distintos → z-scores diferenciados
 # Dados reais BCB série 21083 — Inadimplência PJ Total SFN — ago/2024 a mar/2026
@@ -501,12 +501,12 @@ def calcular_indicador_risco_setorial(df_aux: pd.DataFrame,
                                        df_bol: pd.DataFrame) -> dict:
     """
     Calcula o Indicador de Risco Setorial baseado no z-score histórico de
-    24 meses da inadimplência PJ do setor predominante (BCB SGS).
+    19 meses da inadimplência PJ Total SFN (BCB 21083).
 
     Lógica:
       1. Identifica setor predominante por valor dos boletos
       2. Busca 25 meses da série BCB (24 histórico + 1 atual)
-      3. Calcula média e desvio padrão dos 24 meses históricos
+      3. Calcula média e desvio padrão dos 19 meses históricos
       4. Calcula z-score do valor atual
       5. Classifica tag:
            z ≤ -0.5 → Recomendado  (inadimplência abaixo da média)
@@ -555,20 +555,20 @@ def calcular_indicador_risco_setorial(df_aux: pd.DataFrame,
     if z <= -0.5:
         tag, cor, emoji = 'Recomendado', '#00cc70', '✅'
         interpretacao = (
-            f"A inadimplência do setor está {abs(z):.2f} desvios abaixo da média "
-            f"histórica dos últimos 24 meses — momento favorável para aquisição."
+            f"A inadimplência PJ geral está {abs(z):.2f} desvios abaixo da média "
+            f"histórica dos últimos 19 meses — momento favorável para aquisição."
         )
     elif z < 0.5:
         tag, cor, emoji = 'Regular', '#F59E0B', '🔶'
         interpretacao = (
-            f"A inadimplência do setor está dentro da faixa histórica normal "
+            f"A inadimplência PJ geral está dentro da faixa histórica normal "
             f"(z-score: {z:+.2f}) — momento neutro para aquisição."
         )
     else:
         tag, cor, emoji = 'Atenção', '#EF4444', '🚨'
         interpretacao = (
-            f"A inadimplência do setor está {z:.2f} desvios acima da média "
-            f"histórica dos últimos 24 meses — momento desfavorável para aquisição."
+            f"A inadimplência PJ geral está {z:.2f} desvios acima da média "
+            f"histórica dos últimos 19 meses — momento desfavorável para aquisição."
         )
 
     print(f"[SafeAsset] Risco Setorial — setor: {setor_label} | "
