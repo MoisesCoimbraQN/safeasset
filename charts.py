@@ -759,8 +759,9 @@ def fig_prob_ml_hist(df_full: pd.DataFrame) -> go.Figure:
 
 def fig_risco_setorial(ind_risco: dict) -> go.Figure:
     """
-    Gráfico de linha da inadimplência setorial histórica (24 meses)
+    Gráfico de linha da inadimplência PJ geral histórica (19 meses)
     com faixa sombreada de referência (média ± 0.5σ) e ponto atual destacado.
+    Fonte: BCB 21083 — Inadimplência PJ Total SFN.
     """
     if not ind_risco or ind_risco.get('df_historico') is None:
         return go.Figure()
@@ -789,14 +790,14 @@ def fig_risco_setorial(ind_risco: dict) -> go.Figure:
     fig.add_trace(go.Scatter(
         x=df['data'], y=df['valor'],
         mode='lines+markers',
-        name='Inadimplência PJ (%)',
+        name='Inadimplência PJ Total SFN (BCB 21083)',
         line=dict(color=MUTED, width=2),
         marker=dict(size=4, color=MUTED),
     ))
 
     # Linha da média
     fig.add_hline(y=med, line_dash='dash', line_color=AMBER, line_width=1.5,
-                  annotation_text=f'Média 24m: {med:.2f}%',
+                  annotation_text=f'Média 19m: {med:.2f}%',
                   annotation_font_color=AMBER, annotation_position='right')
 
     # Ponto atual destacado

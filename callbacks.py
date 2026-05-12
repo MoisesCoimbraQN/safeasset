@@ -1947,25 +1947,82 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                                    'marginTop': '10px'})]),
                     ]),
 
-                    # ── Bloco 5 — Contexto Macro do Setor ────────────────────
+                    # ── Bloco 5 — Contexto Macro ─────────────────────────────
                     *([card([
-                        html.Div('5 — Contexto Macroeconômico do Setor',
+                        html.Div('5 — Indicador de Inadimplência PJ (Mercado)',
                                  style={'fontSize': '14px', 'fontWeight': '700',
                                         'color': ACCENT, 'marginBottom': '16px',
                                         'borderLeft': f'4px solid {ACCENT}',
                                         'paddingLeft': '10px'}),
-                        html.Div(
-                            f'Indicador de Inadimplência PJ geral (BCB 21083) — setor predominante: '
-                            f'{R["ind_risco"]["emoji"]}  {R["ind_risco"]["tag"]} — '
-                            f'Setor {R["ind_risco"]["setor_label"]} · '
-                            f'Inadimplência atual {R["ind_risco"]["valor_atual"]:.2f}% '
-                            f'vs média histórica {R["ind_risco"]["media_24m"]:.2f}%',
-                            style={'fontSize': '12px', 'color': WHITE}),
-                        html.Div(
-                            'O indicador de inadimplência PJ geral se aplica também aos CNPJs novos — '
-                            'contexto adicional para a decisão de aquisição.',
-                            style={'fontSize': '11px', 'color': MUTED, 'marginTop': '8px',
-                                   'fontStyle': 'italic'}),
+
+                        # Nota informativa
+                        html.Div([
+                            html.Span('ℹ️ ', style={'fontWeight': '700'}),
+                            html.Span(
+                                'Série BCB 21083 — Inadimplência PJ Total SFN. '
+                                'Reflete o mercado PJ geral, não um setor específico.',
+                                style={'fontSize': '11px', 'color': MUTED,
+                                       'fontStyle': 'italic'}),
+                        ], style={
+                            'background': '#0a1520', 'border': f'1px solid {BORDER}',
+                            'borderRadius': '8px', 'padding': '8px 14px',
+                            'marginBottom': '14px',
+                        }),
+
+                        dbc.Row([
+                            dbc.Col([
+                                # Tag + interpretação
+                                html.Div([
+                                    html.Span(R['ind_risco']['emoji'] + '  ',
+                                              style={'fontSize': '22px'}),
+                                    html.Span(R['ind_risco']['tag'],
+                                              style={'fontSize': '20px', 'fontWeight': '800',
+                                                     'color': R['ind_risco']['cor']}),
+                                ], style={'marginBottom': '8px'}),
+                                html.Div(R['ind_risco']['interpretacao'],
+                                         style={'fontSize': '12px', 'color': WHITE,
+                                                'lineHeight': '1.6', 'marginBottom': '12px'}),
+                                dbc.Row([
+                                    dbc.Col(kpi('Inadimplência PJ Atual',
+                                        f'{R["ind_risco"]["valor_atual"]:.2f}%',
+                                        f'Referência: {R["ind_risco"]["data_atual"]}',
+                                        R['ind_risco']['cor']), width=6),
+                                    dbc.Col(kpi('Média Histórica 19m',
+                                        f'{R["ind_risco"]["media_24m"]:.2f}%',
+                                        'BCB 21083 — PJ Total SFN', ACCENT), width=6),
+                                ], className='g-2'),
+                            ], width=5),
+                            dbc.Col([
+                                # Destaque do setor predominante da carteira
+                                html.Div([
+                                    html.Div('Setor Predominante da Carteira',
+                                             style={'fontSize': '10px', 'color': MUTED,
+                                                    'fontWeight': '600', 'letterSpacing': '0.05em',
+                                                    'textTransform': 'uppercase',
+                                                    'marginBottom': '6px'}),
+                                    html.Div([
+                                        html.Span('🏭 ',
+                                                  style={'fontSize': '16px'}),
+                                        html.Span(R['ind_risco']['setor_label'],
+                                                  style={'fontSize': '16px', 'fontWeight': '700',
+                                                         'color': ACCENT}),
+                                    ], style={'marginBottom': '6px'}),
+                                    html.Div(
+                                        f'{R["ind_risco"]["pct_valor"]:.1f}% do valor total da carteira',
+                                        style={'fontSize': '11px', 'color': MUTED,
+                                               'fontStyle': 'italic'}),
+                                    html.Div(
+                                        'O indicador PJ geral é o único disponível via API BCB — '
+                                        'não há série específica por setor CNAE.',
+                                        style={'fontSize': '10px', 'color': MUTED,
+                                               'fontStyle': 'italic', 'marginTop': '8px'}),
+                                ], style={
+                                    'background': '#0c1e35',
+                                    'border': f'1px solid #185FA5',
+                                    'borderRadius': '8px', 'padding': '12px 14px',
+                                }),
+                            ], width=7),
+                        ], className='g-3'),
                     ])] if R.get('ind_risco') else []),
 
                     # ── Download ──────────────────────────────────────────────
