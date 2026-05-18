@@ -242,6 +242,7 @@ def register_callbacks(app):
     @app.callback(
         Output('main-content',   'children'),
         Output('loading-output', 'children'),
+        Output('store-df-full',  'data'),
         Input('btn-run',         'n_clicks'),
         Input('btn-run-upload',  'n_clicks'),
         Input('btn-run-ml',      'n_clicks'),
@@ -252,9 +253,9 @@ def register_callbacks(app):
         Input('flt-cnae',        'value'),
         Input('flt-date',        'start_date'),
         Input('flt-date',        'end_date'),
-        Input('store-raw-cart',  'data'),
         State('store-raw-aux',   'data'),
         State('store-raw-bol',   'data'),
+        State('store-raw-cart',  'data'),
         State('sl-test',  'value'),
         State('sl-trees', 'value'),
         State('sl-dup-thresh',  'value'),
@@ -264,18 +265,15 @@ def register_callbacks(app):
     def run_dashboard(run_clicks, run_upload_clicks, ml_clicks, fraud_clicks,
                       cart_clicks,
                       cnpj_q, sel_ufs, sel_cnaes, date_from, date_to,
-                      cart_json,
-                      aux_json_input, bol_json,
+                      aux_json_input, bol_json, cart_json,
                       test_size, n_trees, dup_thresh, emit_thresh):
 
         from dash.exceptions import PreventUpdate
         from dash import ctx
 
-        # Aguardar ambos os arquivos — mas não bloquear se um já estava no store
         if not aux_json_input and not bol_json:
             raise PreventUpdate
 
-        # Se disparou pelo btn-run-cart mas pipeline ainda não rodou — prevenir
         triggered = ctx.triggered_id if ctx.triggered_id else ''
         cart_only = triggered == 'btn-run-cart'
 
@@ -285,7 +283,7 @@ def register_callbacks(app):
                 html.Div('Aguardando base auxiliar…', style={'color': MUTED, 'fontSize': '15px'}),
                 html.Div('Faça o upload do arquivo base_auxiliar_fiap.csv',
                          style={'color': WARN, 'fontSize': '13px', 'marginTop': '6px'}),
-            ], style={'textAlign': 'center', 'padding': '60px'}), ''
+            ], style={'textAlign': 'center', 'padding': '60px'}), '', None
 
         if not bol_json:
             return html.Div([
@@ -293,19 +291,19 @@ def register_callbacks(app):
                 html.Div('Base auxiliar carregada ✅', style={'color': ACCENT2, 'fontSize': '15px'}),
                 html.Div('Agora faça o upload do arquivo base_boletos_fiap.csv',
                          style={'color': MUTED, 'fontSize': '13px', 'marginTop': '6px'}),
-            ], style={'textAlign': 'center', 'padding': '60px'}), ''
+            ], style={'textAlign': 'center', 'padding': '60px'}), '', None
 
         try:
             df_aux = read_json(aux_json_input)
         except Exception as e:
             return html.Div(f'❌ Erro ao ler base auxiliar: {e}',
-                            style={'color': WARN, 'padding': '40px'}), ''
+                            style={'color': WARN, 'padding': '40px'}), '', None
 
         try:
             df_bol = read_json(bol_json)
         except Exception as e:
             return html.Div(f'❌ Erro ao ler base de boletos: {e}',
-                            style={'color': WARN, 'padding': '40px'}), ''
+                            style={'color': WARN, 'padding': '40px'}), '', None
 
         # ── Aplicar filtros globais ───────────────────────────────────────
         if cnpj_q:
@@ -324,7 +322,7 @@ def register_callbacks(app):
 
         if len(df_aux) < 10:
             return html.Div('⚠️ Filtro muito restritivo — poucos dados disponíveis.',
-                            style={'color': WARN, 'padding': '40px', 'textAlign': 'center'}), ''
+                            style={'color': WARN, 'padding': '40px', 'textAlign': 'center'}), '', None
 
         # ── Executar pipeline ─────────────────────────────────────────────
         try:
@@ -345,7 +343,7 @@ def register_callbacks(app):
                 html.Pre(traceback.format_exc(),
                          style={'color': MUTED, 'fontSize': '11px', 'background': '#0d1b2a',
                                 'padding': '12px', 'borderRadius': '6px', 'overflow': 'auto'}),
-            ], style={'padding': '24px'}), ''
+            ], style={'padding': '24px'}), '', None
 
         # ── Análise da carteira nova (se disponível) ──────────────────────
         df_cart = read_json(cart_json) if cart_json else None
@@ -359,13 +357,9 @@ def register_callbacks(app):
             R['df_carteira'] = None
 
         # ── Calcular Indicador de Risco Setorial ──────────────────────────
-        # Usa df_bol_original (sem filtros de data/UF) para garantir z-score
-        # idêntico ao calculado no update_macro_content
         try:
             from macro import calcular_indicador_risco_setorial
-            _df_bol_orig = read_json(bol_json)   # sem filtros aplicados
-            _df_aux_orig = read_json(aux_json_input)  # sem filtros aplicados
-            R['ind_risco'] = calcular_indicador_risco_setorial(_df_aux_orig, _df_bol_orig)
+            R['ind_risco'] = calcular_indicador_risco_setorial(df_aux, df_bol)
             print(f"[SafeAsset] ind_risco: {R['ind_risco']['tag']} — {R['ind_risco']['setor_label']}")
         except Exception as _e:
             print(f"[SafeAsset] ind_risco erro: {_e}")
@@ -375,7 +369,8 @@ def register_callbacks(app):
         dashboard = build_dashboard(R, 0.65, 800,
                                      dup_thresh  or 0.05,
                                      emit_thresh or 10)
-        return dashboard, ''
+        df_full_json = R['df_full'].to_json(date_format='iso', orient='split')
+        return dashboard, '', df_full_json
 
     # ── Filtros do ranking ─────────────────────────────────────────────────
     @app.callback(
@@ -385,22 +380,14 @@ def register_callbacks(app):
         Input('rank-cnae',   'value'),
         Input('rank-rating', 'value'),
         Input('rank-score',  'value'),
-        State('store-raw-aux', 'data'),
-        State('store-raw-bol', 'data'),
-        State('sl-test',  'value'),
-        State('sl-trees', 'value'),
+        State('store-df-full', 'data'),
         prevent_initial_call=True,
     )
-    def update_rank_table(cnpj_q, sel_ufs, sel_cnaes, sel_ratings, score_range,
-                          aux_json, bol_json, test_size, n_trees):
-        if not aux_json or not bol_json:
-            return html.Div('Dados não carregados.', style={'color': MUTED})
-        df_aux = read_json(aux_json)
-        df_bol = read_json(bol_json)
-        R = pl.run_pipeline(df_aux.copy(), df_bol.copy(),
-                             test_size=test_size or 0.2, n_estimators=n_trees or 300,
-                             liq_thresh=0.65, mat_thresh=800)
-        return build_rank_table(R['df_full'], cnpj_q, sel_ufs, sel_cnaes, sel_ratings, score_range)
+    def update_rank_table(cnpj_q, sel_ufs, sel_cnaes, sel_ratings, score_range, df_full_json):
+        if not df_full_json:
+            return html.Div('Pipeline ainda não executado.', style={'color': MUTED})
+        df_full = read_json(df_full_json)
+        return build_rank_table(df_full, cnpj_q, sel_ufs, sel_cnaes, sel_ratings, score_range)
 
 
 

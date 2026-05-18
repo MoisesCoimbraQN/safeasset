@@ -348,6 +348,7 @@ def create_layout():
             dcc.Store(id='store-raw-bol'),
             dcc.Store(id='store-raw-cart'),
             dcc.Store(id='store-macro'),
+            dcc.Store(id='store-df-full'), 
             dcc.Store(id='store-sidebar', data='open'),
 
             build_header(),
