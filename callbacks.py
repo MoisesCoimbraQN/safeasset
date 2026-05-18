@@ -247,7 +247,6 @@ def register_callbacks(app):
         Input('btn-run-upload',  'n_clicks'),
         Input('btn-run-ml',      'n_clicks'),
         Input('btn-run-fraud',   'n_clicks'),
-        Input('btn-run-cart',    'n_clicks'),
         Input('flt-cnpj',        'value'),
         Input('flt-uf',          'value'),
         Input('flt-cnae',        'value'),
@@ -263,7 +262,6 @@ def register_callbacks(app):
         prevent_initial_call=True,
     )
     def run_dashboard(run_clicks, run_upload_clicks, ml_clicks, fraud_clicks,
-                      cart_clicks,
                       cnpj_q, sel_ufs, sel_cnaes, date_from, date_to,
                       aux_json_input, bol_json, cart_json,
                       test_size, n_trees, dup_thresh, emit_thresh):
@@ -273,9 +271,6 @@ def register_callbacks(app):
 
         if not aux_json_input and not bol_json:
             raise PreventUpdate
-
-        triggered = ctx.triggered_id if ctx.triggered_id else ''
-        cart_only = triggered == 'btn-run-cart'
 
         if not aux_json_input:
             return html.Div([
