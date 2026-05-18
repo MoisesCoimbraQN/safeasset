@@ -40,12 +40,12 @@ except ImportError:
 # Removidas por leakage ou perspectiva errada:
 #   bol_* — calculadas sobre os mesmos boletos que definem o target
 #   cedente_indice_liquidez_1m — mede comportamento como CEDENTE, não pagador
+#   indicador_liquidez_quantitativo_3m — idem, perspectiva de cedente, não pagador
 FEATURES = [
     'sacado_indice_liquidez_1m',           # % boletos pagos como pagador (1m)
     'score_materialidade_evolucao',         # tendência do score de risco de pagamento
     'score_quantidade_v2',                  # score risco por quantidade de boletos
     'score_materialidade_v2',               # score risco por valor de boletos
-    'indicador_liquidez_quantitativo_3m',   # liquidez 3m — janela mais estável
     'share_vl_inad_pag_bol_6_a_15d',       # % atraso leve (6-15 dias) como pagador
     'media_atraso_dias',                    # média de dias de atraso como pagador
 ]
