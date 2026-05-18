@@ -1122,48 +1122,6 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                     ])] if _notas else []),
                 ], style={'marginBottom': '20px'}),
 
-                # Bloco COBERTURA
-                *([card([
-                    html.Div('📊 Cobertura da Carteira',
-                             style={'fontSize': '15px', 'fontWeight': '700',
-                                    'color': WHITE, 'marginBottom': '16px',
-                                    'borderLeft': f'4px solid {ACCENT}',
-                                    'paddingLeft': '10px'}),
-                    html.Div('Quantos CNPJs da carteira têm histórico PCR e podem ser avaliados pelo modelo',
-                             style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '16px'}),
-                    dbc.Row([
-                        dbc.Col(kpi('Total na Carteira',
-                            f'{R["cobertura"]["total_cnpjs"]:,}',
-                            'CNPJs na carteira nova', ACCENT), width=2),
-                        dbc.Col(kpi('Com Histórico PCR',
-                            f'{R["cobertura"]["com_historico"]:,}',
-                            f'{R["cobertura"]["pct_com_historico"]:.1f}% — score confiável',
-                            ACCENT2), width=2),
-                        dbc.Col(kpi('Sem Histórico',
-                            f'{R["cobertura"]["sem_historico"]:,}',
-                            f'{R["cobertura"]["pct_sem_historico"]:.1f}% — primeiro contato',
-                            WARN), width=2),
-                        dbc.Col(kpi('Recomendados (A+B)',
-                            f'{R["cobertura"]["recomendados"]:,}',
-                            'dos que têm histórico', ACCENT2), width=2),
-                        dbc.Col(kpi('Atenção (C)',
-                            f'{R["cobertura"]["atencao"]:,}',
-                            'análise complementar', AMBER), width=2),
-                        dbc.Col(kpi('Não Recomendados',
-                            f'{R["cobertura"]["nao_recomendados"]:,}',
-                            'rating D ou E', WARN), width=2),
-                    ], className='g-2'),
-                    *([html.Div([
-                        html.Span('⚠️  ', style={'fontSize': '13px'}),
-                        html.Span(
-                            f'{R["cobertura"]["sem_historico"]:,} CNPJs '
-                            f'({R["cobertura"]["pct_sem_historico"]:.1f}%) não possuem histórico PCR. '
-                            'O modelo usou imputação pela mediana — análise individual obrigatória '
-                            'antes da aquisição desses títulos.',
-                            style={'fontSize': '11px', 'color': '#c8a84b', 'fontStyle': 'italic'}),
-                    ], style={'marginTop': '10px'})]
-                    if R['cobertura']['sem_historico'] > 0 else []),
-                ])] if R.get('cobertura') else []),
 
                 # Bloco Target
                 card([
@@ -1789,6 +1747,52 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
 
                 section_title('CNPJs sem Histórico PCR',
                     'Análise específica para subsidiar decisão manual do analista'),
+
+                # ════════════════════════════════════════════════════════
+                # BLOCO COBERTURA — Cobertura da carteira nova
+                # ════════════════════════════════════════════════════════
+                *([card([
+                    html.Div('📊 Cobertura da Carteira',
+                             style={'fontSize': '15px', 'fontWeight': '700',
+                                    'color': WHITE, 'marginBottom': '16px',
+                                    'borderLeft': f'4px solid {ACCENT}',
+                                    'paddingLeft': '10px'}),
+                    html.Div('Quantos CNPJs da carteira têm histórico PCR e podem ser avaliados pelo modelo',
+                             style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '16px'}),
+                    dbc.Row([
+                        dbc.Col(kpi('Total na Carteira',
+                            f'{R["cobertura"]["total_cnpjs"]:,}',
+                            'CNPJs na carteira nova', ACCENT), width=2),
+                        dbc.Col(kpi('Com Histórico PCR',
+                            f'{R["cobertura"]["com_historico"]:,}',
+                            f'{R["cobertura"]["pct_com_historico"]:.1f}% — score confiável',
+                            ACCENT2), width=2),
+                        dbc.Col(kpi('Sem Histórico',
+                            f'{R["cobertura"]["sem_historico"]:,}',
+                            f'{R["cobertura"]["pct_sem_historico"]:.1f}% — primeiro contato',
+                            WARN), width=2),
+                        dbc.Col(kpi('Recomendados (A+B)',
+                            f'{R["cobertura"]["recomendados"]:,}',
+                            'dos que têm histórico', ACCENT2), width=2),
+                        dbc.Col(kpi('Atenção (C)',
+                            f'{R["cobertura"]["atencao"]:,}',
+                            'análise complementar', AMBER), width=2),
+                        dbc.Col(kpi('Não Recomendados',
+                            f'{R["cobertura"]["nao_recomendados"]:,}',
+                            'rating D ou E', WARN), width=2),
+                    ], className='g-2'),
+                    *([html.Div([
+                        html.Span('⚠️  ', style={'fontSize': '13px'}),
+                        html.Span(
+                            f'{R["cobertura"]["sem_historico"]:,} CNPJs '
+                            f'({R["cobertura"]["pct_sem_historico"]:.1f}%) não possuem histórico PCR. '
+                            'O modelo usou imputação pela mediana — análise individual obrigatória '
+                            'antes da aquisição desses títulos.',
+                            style={'fontSize': '11px', 'color': '#c8a84b',
+                                   'fontStyle': 'italic'}),
+                    ], style={'marginTop': '10px'})]
+                    if R['cobertura']['sem_historico'] > 0 else []),
+                ])] if R.get('cobertura') else []),
 
                 *([
                     # Aviso principal
