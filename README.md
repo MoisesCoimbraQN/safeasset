@@ -108,7 +108,7 @@ O `run_pipeline()` (em `pipeline.py`) executa, nesta ordem:
 ## 💻 Instalação
 
 ```bash
-git clone (https://github.com/MoisesCoimbraQN/safeasset)
+git clone https://github.com/MoisesCoimbraQN/safeasset
 cd safeasset
 
 python -m venv venv
@@ -139,7 +139,7 @@ xgboost
 python app.py
 ```
 
-Acesse **http://localhost:8050**
+Acesse **https://safeasset.onrender.com/**
 
 **Passo a passo no dashboard:**
 1. Faça upload da **Base Auxiliar** e da **Base de Boletos** na barra lateral;
