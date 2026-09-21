@@ -824,129 +824,129 @@ def register_callbacks(app):
                                 'maxHeight': '300px'}),
             ], style={'padding': '24px'})
 
-@app.callback(
-    Output('cedentes-content', 'children'),
-    Input('tabs-main', 'value'),
-    State('store-df-full', 'data'),
-    State('store-raw-bol', 'data'),
-    prevent_initial_call=True,
-)
-def update_cedentes_content(tab_ativa, df_full_json, bol_json):
-    if tab_ativa != 'tab-cedentes':
-        from dash.exceptions import PreventUpdate
-        raise PreventUpdate
-    if not df_full_json or not bol_json:
-        return html.Div(
-            '🏦 Execute a análise histórica (aba lateral) para ver o perfil dos cedentes.',
-            style={'color': MUTED, 'fontSize': '14px', 'textAlign': 'center', 'padding': '40px'}
-        )
+    @app.callback(
+        Output('cedentes-content', 'children'),
+        Input('tabs-main', 'value'),
+        State('store-df-full', 'data'),
+        State('store-raw-bol', 'data'),
+        prevent_initial_call=True,
+    )
+    def update_cedentes_content(tab_ativa, df_full_json, bol_json):
+        if tab_ativa != 'tab-cedentes':
+            from dash.exceptions import PreventUpdate
+            raise PreventUpdate
+        if not df_full_json or not bol_json:
+            return html.Div(
+                '🏦 Execute a análise histórica (aba lateral) para ver o perfil dos cedentes.',
+                style={'color': MUTED, 'fontSize': '14px', 'textAlign': 'center', 'padding': '40px'}
+            )
 
-    import pipeline as pl
-    df_full = read_json(df_full_json)
-    df_bol  = read_json(bol_json)
-    perfil_cedentes = pl.calcular_perfil_beneficiario(df_bol, df_full)
+        import pipeline as pl
+        df_full = read_json(df_full_json)
+        df_bol  = read_json(bol_json)
+        perfil_cedentes = pl.calcular_perfil_beneficiario(df_bol, df_full)
 
-    if perfil_cedentes.empty:
-        return html.Div('Nenhum dado de cedente disponível.',
-                         style={'color': MUTED, 'fontSize': '13px', 'padding': '24px'})
+        if perfil_cedentes.empty:
+            return html.Div('Nenhum dado de cedente disponível.',
+                            style={'color': MUTED, 'fontSize': '13px', 'padding': '24px'})
 
-    n_cedentes    = len(perfil_cedentes)
-    n_recorrentes = int((perfil_cedentes['qtd_cnpjs_cedidos'] > 1).sum())
-    top_cedente   = perfil_cedentes.iloc[0]
-    pior_cedente  = perfil_cedentes.sort_values('score_medio_carteira').iloc[0]
+        n_cedentes    = len(perfil_cedentes)
+        n_recorrentes = int((perfil_cedentes['qtd_cnpjs_cedidos'] > 1).sum())
+        top_cedente   = perfil_cedentes.iloc[0]
+        pior_cedente  = perfil_cedentes.sort_values('score_medio_carteira').iloc[0]
 
-    return html.Div([
-        html.Div(
-            'ℹ️  Sem histórico entre execuções ainda — os indicadores refletem a carteira atual. '
-            'Tendência ao longo do tempo aparece conforme novas cessões forem registradas.',
-            style={'fontSize': '11px', 'color': MUTED, 'fontStyle': 'italic', 'marginBottom': '16px'}
-        ),
-        dbc.Row([
-            dbc.Col(kpi('Total de Cedentes', f'{n_cedentes:,}', 'beneficiários distintos', ACCENT), width=3),
-            dbc.Col(kpi('Cedentes Recorrentes', f'{n_recorrentes:,}', '> 1 CNPJ cedido nesta carteira', ACCENT2), width=3),
-            dbc.Col(kpi('Maior Volume', str(top_cedente['id_beneficiario'])[:14],
-                        f'{int(top_cedente["qtd_cnpjs_cedidos"])} CNPJs cedidos', ACCENT), width=3),
-            dbc.Col(kpi('Menor Score Médio', str(pior_cedente['id_beneficiario'])[:14],
-                        f'Score {pior_cedente["score_medio_carteira"]:.0f}', WARN), width=3),
-        ], className='g-3', style={'marginBottom': '20px'}),
-        card([
-            html.Div('Ranking de Cedentes — Qtd de CNPJs cedidos ao fundo',
-                     style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '4px'}),
-            html.Div('Cor = score médio da carteira cedida (não é tendência — depende de histórico)',
-                     style={'fontSize': '10px', 'color': MUTED, 'marginBottom': '8px'}),
-            dcc.Graph(figure=ch.fig_cedentes_ranking(perfil_cedentes), config={'displayModeBar': False}),
-        ]),
-        html.Hr(style={'borderColor': BORDER, 'margin': '20px 0'}),
-        card([
-            html.Div('🔍 Ver detalhe de um cedente', style={'fontSize': '14px', 'fontWeight': '600', 'marginBottom': '10px'}),
-            dcc.Dropdown(
-                id='cedente-sel',
-                options=[{'label': str(b), 'value': str(b)} for b in perfil_cedentes['id_beneficiario']],
-                placeholder='Selecione um beneficiário…',
-                className='dark-dropdown', style={'marginBottom': '12px'},
+        return html.Div([
+            html.Div(
+                'ℹ️  Sem histórico entre execuções ainda — os indicadores refletem a carteira atual. '
+                'Tendência ao longo do tempo aparece conforme novas cessões forem registradas.',
+                style={'fontSize': '11px', 'color': MUTED, 'fontStyle': 'italic', 'marginBottom': '16px'}
             ),
-            html.Div(id='cedente-detalhe'),
-        ]),
-    ])
+            dbc.Row([
+                dbc.Col(kpi('Total de Cedentes', f'{n_cedentes:,}', 'beneficiários distintos', ACCENT), width=3),
+                dbc.Col(kpi('Cedentes Recorrentes', f'{n_recorrentes:,}', '> 1 CNPJ cedido nesta carteira', ACCENT2), width=3),
+                dbc.Col(kpi('Maior Volume', str(top_cedente['id_beneficiario'])[:14],
+                            f'{int(top_cedente["qtd_cnpjs_cedidos"])} CNPJs cedidos', ACCENT), width=3),
+                dbc.Col(kpi('Menor Score Médio', str(pior_cedente['id_beneficiario'])[:14],
+                            f'Score {pior_cedente["score_medio_carteira"]:.0f}', WARN), width=3),
+            ], className='g-3', style={'marginBottom': '20px'}),
+            card([
+                html.Div('Ranking de Cedentes — Qtd de CNPJs cedidos ao fundo',
+                        style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '4px'}),
+                html.Div('Cor = score médio da carteira cedida (não é tendência — depende de histórico)',
+                        style={'fontSize': '10px', 'color': MUTED, 'marginBottom': '8px'}),
+                dcc.Graph(figure=ch.fig_cedentes_ranking(perfil_cedentes), config={'displayModeBar': False}),
+            ]),
+            html.Hr(style={'borderColor': BORDER, 'margin': '20px 0'}),
+            card([
+                html.Div('🔍 Ver detalhe de um cedente', style={'fontSize': '14px', 'fontWeight': '600', 'marginBottom': '10px'}),
+                dcc.Dropdown(
+                    id='cedente-sel',
+                    options=[{'label': str(b), 'value': str(b)} for b in perfil_cedentes['id_beneficiario']],
+                    placeholder='Selecione um beneficiário…',
+                    className='dark-dropdown', style={'marginBottom': '12px'},
+                ),
+                html.Div(id='cedente-detalhe'),
+            ]),
+        ])
 
-@app.callback(
-    Output('cedente-detalhe', 'children'),
-    Input('cedente-sel', 'value'),
-    State('store-df-full', 'data'),
-    State('store-raw-bol', 'data'),
-    prevent_initial_call=True,
-)
-def update_cedente_detalhe(id_benef, df_full_json, bol_json):
-    if not id_benef or not df_full_json or not bol_json:
-        from dash.exceptions import PreventUpdate
-        raise PreventUpdate
+    @app.callback(
+        Output('cedente-detalhe', 'children'),
+        Input('cedente-sel', 'value'),
+        State('store-df-full', 'data'),
+        State('store-raw-bol', 'data'),
+        prevent_initial_call=True,
+    )
+    def update_cedente_detalhe(id_benef, df_full_json, bol_json):
+        if not id_benef or not df_full_json or not bol_json:
+            from dash.exceptions import PreventUpdate
+            raise PreventUpdate
 
-    df_full = read_json(df_full_json)
-    df_bol  = read_json(bol_json)
+        df_full = read_json(df_full_json)
+        df_bol  = read_json(bol_json)
 
-    bol_c = df_bol[df_bol['id_beneficiario'].astype(str) == str(id_benef)]
-    cnpjs_cedidos = set(bol_c['id_pagador'].astype(str).unique())
-    df_sacados = df_full[df_full['id_cnpj'].astype(str).isin(cnpjs_cedidos)].copy()
+        bol_c = df_bol[df_bol['id_beneficiario'].astype(str) == str(id_benef)]
+        cnpjs_cedidos = set(bol_c['id_pagador'].astype(str).unique())
+        df_sacados = df_full[df_full['id_cnpj'].astype(str).isin(cnpjs_cedidos)].copy()
 
-    if df_sacados.empty:
-        return html.Div('Nenhum sacado encontrado para este cedente.',
-                         style={'color': MUTED, 'fontSize': '12px'})
+        if df_sacados.empty:
+            return html.Div('Nenhum sacado encontrado para este cedente.',
+                            style={'color': MUTED, 'fontSize': '12px'})
 
-    vlr_total = bol_c['vlr_nominal'].sum()
-    score_med = df_sacados['score_fidc'].mean()
-    pct_ab    = df_sacados['rating_carteira'].isin(['A — Excelente', 'B — Bom']).mean() * 100
+        vlr_total = bol_c['vlr_nominal'].sum()
+        score_med = df_sacados['score_fidc'].mean()
+        pct_ab    = df_sacados['rating_carteira'].isin(['A — Excelente', 'B — Bom']).mean() * 100
 
-    cols = ['id_cnpj', 'uf', 'score_fidc', 'rating_carteira']
-    if 'prob_ml_bom' in df_sacados.columns: cols.append('prob_ml_bom')
-    if 'flag_risco_fraude' in df_sacados.columns: cols.append('flag_risco_fraude')
+        cols = ['id_cnpj', 'uf', 'score_fidc', 'rating_carteira']
+        if 'prob_ml_bom' in df_sacados.columns: cols.append('prob_ml_bom')
+        if 'flag_risco_fraude' in df_sacados.columns: cols.append('flag_risco_fraude')
 
-    return html.Div([
-        dbc.Row([
-            dbc.Col(kpi('Cessões Registradas', '1', 'sem histórico anterior — 1ª execução', MUTED), width=3),
-            dbc.Col(kpi('CNPJs Cedidos', f'{len(cnpjs_cedidos):,}', f'R$ {vlr_total:,.0f} em boletos', ACCENT), width=3),
-            dbc.Col(kpi('Score Médio', f'{score_med:.0f}', '/ 1000', ACCENT2 if score_med >= 500 else WARN), width=3),
-            dbc.Col(kpi('% Rating A+B', f'{pct_ab:.1f}%', 'qualidade da carteira cedida', ACCENT2), width=3),
-        ], className='g-2', style={'marginBottom': '16px'}),
-        html.Div(
-            '📈 Gráfico de evolução por cessão aparece aqui a partir da 2ª cessão registrada '
-            '(requer persistência entre execuções — Fase 2).',
-            style={'fontSize': '11px', 'color': MUTED, 'fontStyle': 'italic', 'marginBottom': '12px'}
-        ),
-        dash_table.DataTable(
-            data=df_sacados[cols].sort_values('score_fidc', ascending=False).to_dict('records'),
-            columns=[{'name': c, 'id': c} for c in cols],
-            page_size=10, sort_action='native',
-            style_table={'overflowX': 'auto'},
-            style_cell={'backgroundColor': CARD_BG, 'color': WHITE, 'border': f'1px solid {BORDER}',
-                        'fontFamily': 'Space Grotesk', 'fontSize': '12px', 'padding': '8px 12px', 'textAlign': 'left'},
-            style_header={'backgroundColor': BLUE, 'fontWeight': '700', 'color': ACCENT,
-                          'border': f'1px solid {BORDER}', 'fontSize': '12px'},
-            style_data_conditional=[
-                {'if': {'filter_query': f'{{rating_carteira}} = "{r}"'}, 'color': RATING_COLOR.get(r, 'white'), 'fontWeight': '600'}
-                for r in RATING_COLOR
-            ] + [{'if': {'row_index': 'odd'}, 'backgroundColor': '#0d1b2a'}],
-        ),
-    ])
+        return html.Div([
+            dbc.Row([
+                dbc.Col(kpi('Cessões Registradas', '1', 'sem histórico anterior — 1ª execução', MUTED), width=3),
+                dbc.Col(kpi('CNPJs Cedidos', f'{len(cnpjs_cedidos):,}', f'R$ {vlr_total:,.0f} em boletos', ACCENT), width=3),
+                dbc.Col(kpi('Score Médio', f'{score_med:.0f}', '/ 1000', ACCENT2 if score_med >= 500 else WARN), width=3),
+                dbc.Col(kpi('% Rating A+B', f'{pct_ab:.1f}%', 'qualidade da carteira cedida', ACCENT2), width=3),
+            ], className='g-2', style={'marginBottom': '16px'}),
+            html.Div(
+                '📈 Gráfico de evolução por cessão aparece aqui a partir da 2ª cessão registrada '
+                '(requer persistência entre execuções — Fase 2).',
+                style={'fontSize': '11px', 'color': MUTED, 'fontStyle': 'italic', 'marginBottom': '12px'}
+            ),
+            dash_table.DataTable(
+                data=df_sacados[cols].sort_values('score_fidc', ascending=False).to_dict('records'),
+                columns=[{'name': c, 'id': c} for c in cols],
+                page_size=10, sort_action='native',
+                style_table={'overflowX': 'auto'},
+                style_cell={'backgroundColor': CARD_BG, 'color': WHITE, 'border': f'1px solid {BORDER}',
+                            'fontFamily': 'Space Grotesk', 'fontSize': '12px', 'padding': '8px 12px', 'textAlign': 'left'},
+                style_header={'backgroundColor': BLUE, 'fontWeight': '700', 'color': ACCENT,
+                            'border': f'1px solid {BORDER}', 'fontSize': '12px'},
+                style_data_conditional=[
+                    {'if': {'filter_query': f'{{rating_carteira}} = "{r}"'}, 'color': RATING_COLOR.get(r, 'white'), 'fontWeight': '600'}
+                    for r in RATING_COLOR
+                ] + [{'if': {'row_index': 'odd'}, 'backgroundColor': '#0d1b2a'}],
+            ),
+        ])
 
 
 
