@@ -247,6 +247,7 @@ def register_callbacks(app):
         Input('btn-run-upload',  'n_clicks'),
         Input('btn-run-ml',      'n_clicks'),
         Input('btn-run-fraud',   'n_clicks'),
+        Input('btn-run-cart',    'n_clicks'),
         Input('flt-cnpj',        'value'),
         Input('flt-uf',          'value'),
         Input('flt-cnae',        'value'),
@@ -261,7 +262,9 @@ def register_callbacks(app):
         State('sl-emit-thresh', 'value'),
         prevent_initial_call=True,
     )
+    
     def run_dashboard(run_clicks, run_upload_clicks, ml_clicks, fraud_clicks,
+                      cart_clicks,
                       cnpj_q, sel_ufs, sel_cnaes, date_from, date_to,
                       aux_json_input, bol_json, cart_json,
                       test_size, n_trees, dup_thresh, emit_thresh):
@@ -2294,23 +2297,20 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                         html.Div('Faça o upload da carteira nova para ver os CNPJs com histórico PCR.',
                                  style={'fontSize': '15px', 'color': MUTED}),
                     ], style={'textAlign': 'center', 'padding': '60px'}),
-                ]),
+                ]),])]),
             dcc.Tab(label='🏦 Cedentes', value='tab-cedentes', style=tab_style,
-        selected_style={**tab_sel, 'background': '#a78bfa', 'color': NAVY},
-  children=[html.Div(style={'padding': '24px'}, children=[
-    section_title('Cedentes — Histórico de Cessões',
-        'Beneficiários que já venderam carteira ao fundo · Score e qualidade da carteira cedida'),
-    html.Div(id='cedentes-content',
-        children=html.Div(
+                selected_style={**tab_sel, 'background': '#a78bfa', 'color': NAVY},
+                children=[html.Div(style={'padding': '24px'}, children=[
+                section_title('Cedentes — Histórico de Cessões',
+                'Beneficiários que já venderam carteira ao fundo · Score e qualidade da carteira cedida'),
+                html.Div(id='cedentes-content',
+                children=html.Div(
             '🏦 Faça o upload e execute a análise histórica para ver o perfil dos cedentes.',
             style={'color': MUTED, 'fontSize': '14px',
                    'textAlign': 'center', 'padding': '40px'}
         )
     ),
   ])]),
-              ])]),
+              ]),
             
-        ]
-    )
-
     return html.Div([kpi_row, tabs])
