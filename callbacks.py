@@ -2311,6 +2311,6 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
         )
     ),
   ])]),
-              ]),
+              ])
             
     return html.Div([kpi_row, tabs])
