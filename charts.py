@@ -992,6 +992,45 @@ def fig_top10_valor(df: pd.DataFrame) -> go.Figure:
                 xaxis_title='Valor na Carteira (R$)',
                 yaxis_title='CNPJ')
 
+def fig_cedentes_ranking(perfil_cedentes: pd.DataFrame, top_n: int = 15) -> go.Figure:
+    """
+    Barras horizontais dos cedentes por qtd de CNPJs cedidos na carteira atual.
+    Cor = score médio da carteira cedida (qualidade, não tendência — 
+    tendência depende de histórico entre execuções, ainda não disponível).
+    """
+    df = perfil_cedentes.head(top_n).copy()
+    if df.empty:
+        return go.Figure()
+    df = df.sort_values('qtd_cnpjs_cedidos', ascending=True)
+
+    fig = go.Figure(go.Bar(
+        x=df['qtd_cnpjs_cedidos'],
+        y=df['id_beneficiario'].astype(str),
+        orientation='h',
+        marker=dict(
+            color=df['score_medio_carteira'],
+            colorscale=[[0, WARN], [0.5, ACCENT], [1, ACCENT2]],
+            showscale=True,
+            colorbar=dict(title=dict(text='Score Médio', font=dict(color=WHITE, size=11)),
+                          tickfont=dict(color=WHITE, size=10)),
+        ),
+        text=[f"{v:,} CNPJs" for v in df['qtd_cnpjs_cedidos']],
+        textposition='outside',
+        textfont=dict(size=11, color=WHITE),
+        customdata=df[['vlr_total_cedido', 'pct_rating_ab', 'pct_flag_fraude']].values,
+        hovertemplate=(
+            "<b>%{y}</b><br>"
+            "CNPJs cedidos: %{x}<br>"
+            "Valor total: R$ %{customdata[0]:,.0f}<br>"
+            "% Rating A+B: %{customdata[1]:.1f}%<br>"
+            "% Suspeito fraude: %{customdata[2]:.1f}%<extra></extra>"
+        ),
+    ))
+    return _fig(fig, height=max(340, top_n * 40),
+                margin=dict(l=140, r=100, t=20, b=50),
+                xaxis_title='Qtd de CNPJs Cedidos',
+                yaxis=dict(tickfont=dict(size=11)))
+
 # ─────────────────────────────────────────────────────────────────────────────
 # GRÁFICOS MACROECONÔMICOS — séries BCB confirmadas
 # ─────────────────────────────────────────────────────────────────────────────

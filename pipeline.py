@@ -126,6 +126,76 @@ def calcular_perfil_cnae(df_full: pd.DataFrame) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# ANÁLISE DE CEDENTES — Perfil histórico do beneficiário
+# ─────────────────────────────────────────────────────────────────────────────
+
+def calcular_perfil_beneficiario(df_bol: pd.DataFrame, df_full: pd.DataFrame) -> pd.DataFrame:
+    """
+    Agrega o perfil de cessão de carteira por beneficiário (cedente).
+
+    Para cada id_beneficiario, calcula:
+      qtd_cnpjs_cedidos    : nº de sacados distintos na carteira cedida
+      qtd_boletos_total    : nº total de boletos cedidos
+      vlr_total_cedido     : valor nominal total cedido
+      score_medio_carteira : score FIDC médio dos sacados cedidos
+      pct_rating_ab        : % dos sacados com rating A ou B
+      pct_rating_de        : % dos sacados com rating D ou E
+      pct_flag_fraude      : % dos sacados com flag de risco de fraude
+      prob_ml_media        : probabilidade ML média (bom pagador) dos sacados
+
+    Requer df_full já processado por calcular_score_final() e calcular_prob_ml().
+    Sem histórico entre execuções ainda — reflete só a carteira atual (Fase 1).
+    """
+    cols_full = ['id_cnpj', 'score_fidc', 'rating_carteira']
+    if 'prob_ml_bom' in df_full.columns:
+        cols_full.append('prob_ml_bom')
+    if 'flag_risco_fraude' in df_full.columns:
+        cols_full.append('flag_risco_fraude')
+
+    bol_sac = df_bol[['id_beneficiario', 'id_pagador', 'vlr_nominal']].merge(
+        df_full[cols_full], left_on='id_pagador', right_on='id_cnpj', how='left'
+    )
+
+    agg = dict(
+        qtd_boletos_total    = ('id_pagador', 'count'),
+        vlr_total_cedido     = ('vlr_nominal', 'sum'),
+        score_medio_carteira = ('score_fidc', 'mean'),
+    )
+    if 'prob_ml_bom' in bol_sac.columns:
+        agg['prob_ml_media'] = ('prob_ml_bom', 'mean')
+
+    perfil = bol_sac.groupby('id_beneficiario').agg(**agg).reset_index()
+
+    qtd_sacados = (bol_sac.groupby('id_beneficiario')['id_pagador']
+                          .nunique().reset_index(name='qtd_cnpjs_cedidos'))
+    perfil = perfil.merge(qtd_sacados, on='id_beneficiario')
+
+    rating_ab = (bol_sac.assign(is_ab=bol_sac['rating_carteira'].isin(['A — Excelente', 'B — Bom']))
+                        .groupby('id_beneficiario')['is_ab'].mean()
+                        .reset_index(name='pct_rating_ab'))
+    rating_de = (bol_sac.assign(is_de=bol_sac['rating_carteira'].isin(['D — Risco Elevado', 'E — Alto Risco']))
+                        .groupby('id_beneficiario')['is_de'].mean()
+                        .reset_index(name='pct_rating_de'))
+    perfil = perfil.merge(rating_ab, on='id_beneficiario').merge(rating_de, on='id_beneficiario')
+
+    if 'flag_risco_fraude' in bol_sac.columns:
+        fraude = (bol_sac.groupby('id_beneficiario')['flag_risco_fraude']
+                         .mean().reset_index(name='pct_flag_fraude'))
+        perfil = perfil.merge(fraude, on='id_beneficiario', how='left')
+    else:
+        perfil['pct_flag_fraude'] = 0.0
+
+    perfil['pct_rating_ab']        = (perfil['pct_rating_ab'] * 100).round(1)
+    perfil['pct_rating_de']        = (perfil['pct_rating_de'] * 100).round(1)
+    perfil['pct_flag_fraude']      = (perfil['pct_flag_fraude'] * 100).round(1)
+    perfil['score_medio_carteira'] = perfil['score_medio_carteira'].round(0)
+    if 'prob_ml_media' in perfil.columns:
+        perfil['prob_ml_media'] = perfil['prob_ml_media'].round(1)
+
+    return perfil.sort_values('qtd_cnpjs_cedidos', ascending=False).reset_index(drop=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # PASSO 2B — DETECÇÃO DE BOLETOS DUPLICADOS E RISCO DE FRAUDE
 # ─────────────────────────────────────────────────────────────────────────────
 

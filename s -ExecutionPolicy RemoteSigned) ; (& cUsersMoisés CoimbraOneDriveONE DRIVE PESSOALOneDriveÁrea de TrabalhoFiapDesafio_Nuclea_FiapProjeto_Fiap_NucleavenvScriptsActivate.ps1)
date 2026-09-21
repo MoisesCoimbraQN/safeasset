@@ -1,0 +1,19 @@
+[33m74337fb[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m, [m[1;31morigin/master[m[33m)[m Nova regra target 2 de 3: quantidade+materialidade+liquidez3m >= 800/0.65
+[33m4e9a095[m Produto 2: Score ML auxiliar contínuo, sem classificação binária
+[33mc769501[m Painéis recolhíveis com botões individuais por seção
+[33m355c7bd[m Adiciona balanceamento scale_pos_weight e calibração Platt no XGBoost
+[33m20a59d5[m Painel Target separado, materialidade default 750, textos divergência corrigidos
+[33m857c60c[m Ajusta thresholds divergência: score>=800 + ML<30% ou score<300 + ML>=70%
+[33m2f6da7a[m Reformula aba Resumo com 4 blocos de KPIs sem tabelas
+[33m30e60c2[m Corrige upload, paineis recolhíveis, une ML+ROC, header correto
+[33mf056e20[m Corrige CARD_BG e AMBER indefinidos no charts.py
+[33mbc6f904[m Corrige AMBER não definido no callbacks
+[33m92b2233[m Corrige macro indefinido e reset_index pandas 3.x
+[33m4ad821d[m Corrige groupby reset_index conflito pandas 3.x
+[33maff291f[m Corrige ValueError id_pagador duplicado no detectar_duplicatas
+[33maaa8880[m correção função duplicatas 2
+[33m73a9078[m correção função duplicatas
+[33m770e046[m Resumo indicativo, Produto 2 ML
+[33m28ec4e2[m Remove features com data leakage do modelo ML
+[33m57524b4[m Corrige versões do requirements.txt
+[33m7aed34b[m SafeAsset — deploy inicial
