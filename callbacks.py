@@ -14,6 +14,7 @@ import dash_bootstrap_components as dbc
 
 import pipeline as pl
 import charts as ch
+import storage as st
 from layout import (card, kpi, section_title, build_rank_table,
                     ACCENT, ACCENT2, WARN, MUTED, BORDER, WHITE, NAVY, BLUE, CARD_BG)
 # Aliases de compatibilidade — tema escuro
@@ -343,6 +344,8 @@ def register_callbacks(app):
                                 'padding': '12px', 'borderRadius': '6px', 'overflow': 'auto'}),
             ], style={'padding': '24px'}), '', None
 
+        run_id = st.novo_run_id()
+
         # ── Análise da carteira nova (se disponível) ──────────────────────
         df_cart = read_json(cart_json) if cart_json else None
         if df_cart is not None and len(df_cart) > 0:
@@ -350,9 +353,12 @@ def register_callbacks(app):
             cobertura = calcular_cobertura_carteira(R['df_full'], df_cart)
             R['cobertura']    = cobertura
             R['df_carteira']  = df_cart
+            perfil_cedentes_novo = pl.calcular_perfil_beneficiario(df_cart, R['df_full'])
+            st.salvar_historico_cedente(run_id, perfil_cedentes_novo, origem='carteira_nova')
         else:
             R['cobertura']   = None
             R['df_carteira'] = None
+
 
         # ── Calcular Indicador de Risco Setorial ──────────────────────────
         try:
@@ -368,7 +374,14 @@ def register_callbacks(app):
                                      dup_thresh  or 0.05,
                                      emit_thresh or 10)
         df_full_json = R['df_full'].to_json(date_format='iso', orient='split')
+
+        st.salvar_snapshot_s3(run_id, aux=df_aux, bol=df_bol, df_full=R['df_full'])
+        st.salvar_historico_cnpj(run_id, R['df_full'])
+        perfil_cedentes_hist = pl.calcular_perfil_beneficiario(df_bol, R['df_full'])
+        st.salvar_historico_cedente(run_id, perfil_cedentes_hist, origem='historico')
         return dashboard, '', df_full_json
+
+       
 
     # ── Filtros do ranking ─────────────────────────────────────────────────
     @app.callback(
