@@ -14,9 +14,14 @@ import dash_bootstrap_components as dbc
 
 import pipeline as pl
 import charts as ch
-import storage as st
 from layout import (card, kpi, section_title, build_rank_table,
                     ACCENT, ACCENT2, WARN, MUTED, BORDER, WHITE, NAVY, BLUE, CARD_BG)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # sem dotenv instalado (ex: produção no Render) — env vars já vêm do ambiente
+
 # Aliases de compatibilidade — tema escuro
 DARK   = WHITE    # texto claro sobre fundo escuro
 AMBER  = '#F59E0B'  # âmbar — usado em alertas e destaques
