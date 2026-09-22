@@ -10,9 +10,11 @@ from boto3.dynamodb.conditions import Key
 from datetime import datetime, timezone
 from decimal import Decimal
 import pandas as pd
-from dotenv import load_dotenv
-
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 REGION        = os.environ.get('AWS_REGION', 'us-east-2')
 S3_BUCKET     = os.environ.get('S3_BUCKET', 'safeasset-snapshots')
