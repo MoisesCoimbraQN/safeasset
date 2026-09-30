@@ -1,4 +1,3 @@
-import pandas as pd
 # =============================================================================
 # callbacks.py — SafeAsset
 # Responsável por: toda a lógica reativa do Dash (callbacks)
@@ -936,24 +935,46 @@ def register_callbacks(app):
 
         vlr_total = bol_c['vlr_nominal'].sum()
         score_med = df_sacados['score_fidc'].mean()
-        pct_ab    = df_sacados['rating_carteira'].isin(['A — Excelente', 'B — Bom']).mean() * 100
 
         cols = ['id_cnpj', 'uf', 'score_fidc', 'rating_carteira']
         if 'prob_ml_bom' in df_sacados.columns: cols.append('prob_ml_bom')
         if 'flag_risco_fraude' in df_sacados.columns: cols.append('flag_risco_fraude')
 
+        # ── Histórico real (Fase 2 — Dynamo) ──────────────────────────────
+        hist = st.buscar_historico_cedente(id_benef)
+        n_cessoes = len(hist) if not hist.empty else 1
+
+        if n_cessoes > 1:
+            delta = hist['score_medio_carteira'].iloc[-1] - hist['score_medio_carteira'].iloc[0]
+            if delta > 5:
+                tend_label, tend_cor = '↑ Melhorando', ACCENT2
+            elif delta < -5:
+                tend_label, tend_cor = '↓ Piorando', WARN
+            else:
+                tend_label, tend_cor = '→ Estável', MUTED
+            grafico_bloco = [
+                dcc.Graph(figure=ch.fig_historico_cedente(hist), config={'displayModeBar': False}),
+                html.Div('Cor do marcador: azul = execução da base histórica · laranja = análise de carteira nova',
+                          style={'fontSize': '10px', 'color': MUTED, 'marginTop': '4px', 'fontStyle': 'italic'}),
+            ]
+        else:
+            tend_label, tend_cor = '—', MUTED
+            grafico_bloco = [html.Div(
+                '📈 Gráfico de evolução aparece a partir da 2ª cessão registrada.',
+                style={'fontSize': '11px', 'color': MUTED, 'fontStyle': 'italic', 'marginBottom': '12px'}
+            )]
+
         return html.Div([
             dbc.Row([
-                dbc.Col(kpi('Cessões Registradas', '1', 'sem histórico anterior — 1ª execução', MUTED), width=3),
-                dbc.Col(kpi('CNPJs Cedidos', f'{len(cnpjs_cedidos):,}', f'R$ {vlr_total:,.0f} em boletos', ACCENT), width=3),
-                dbc.Col(kpi('Score Médio', f'{score_med:.0f}', '/ 1000', ACCENT2 if score_med >= 500 else WARN), width=3),
-                dbc.Col(kpi('% Rating A+B', f'{pct_ab:.1f}%', 'qualidade da carteira cedida', ACCENT2), width=3),
+                dbc.Col(kpi('Cessões Registradas', f'{n_cessoes}',
+                            'no histórico acumulado' if n_cessoes > 1 else '1ª execução registrada', MUTED), width=3),
+                dbc.Col(kpi('CNPJs Cedidos (atual)', f'{len(cnpjs_cedidos):,}',
+                            f'R$ {vlr_total:,.0f} em boletos', ACCENT), width=3),
+                dbc.Col(kpi('Score Médio (atual)', f'{score_med:.0f}', '/ 1000',
+                            ACCENT2 if score_med >= 500 else WARN), width=3),
+                dbc.Col(kpi('Tendência', tend_label, 'entre a 1ª e a última cessão', tend_cor), width=3),
             ], className='g-2', style={'marginBottom': '16px'}),
-            html.Div(
-                '📈 Gráfico de evolução por cessão aparece aqui a partir da 2ª cessão registrada '
-                '(requer persistência entre execuções — Fase 2).',
-                style={'fontSize': '11px', 'color': MUTED, 'fontStyle': 'italic', 'marginBottom': '12px'}
-            ),
+            *grafico_bloco,
             dash_table.DataTable(
                 data=df_sacados[cols].sort_values('score_fidc', ascending=False).to_dict('records'),
                 columns=[{'name': c, 'id': c} for c in cols],
@@ -969,7 +990,6 @@ def register_callbacks(app):
                 ] + [{'if': {'row_index': 'odd'}, 'backgroundColor': '#0d1b2a'}],
             ),
         ])
-
 
 
 # ─────────────────────────────────────────────────────────────────────────────

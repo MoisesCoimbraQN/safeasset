@@ -1031,6 +1031,35 @@ def fig_cedentes_ranking(perfil_cedentes: pd.DataFrame, top_n: int = 15) -> go.F
                 xaxis_title='Qtd de CNPJs Cedidos',
                 yaxis=dict(tickfont=dict(size=11)))
 
+def fig_historico_cedente(hist: pd.DataFrame) -> go.Figure:
+    """Linha do tempo do score médio da carteira cedida por um beneficiário —
+    um ponto por execução registrada. Cor do marcador diferencia a origem
+    (azul = base histórica, laranja = análise de carteira nova)."""
+    if hist is None or hist.empty:
+        return go.Figure()
+    df = hist.copy()
+    df['run_dt'] = pd.to_datetime(df['run_timestamp'], errors='coerce')
+    cores_origem  = {'historico': ACCENT, 'carteira_nova': WARN}
+    marker_colors = [cores_origem.get(o, MUTED) for o in df.get('origem', ['historico'] * len(df))]
+
+    fig = go.Figure(go.Scatter(
+        x=df['run_dt'], y=df['score_medio_carteira'],
+        mode='lines+markers',
+        line=dict(color=ACCENT2, width=2),
+        marker=dict(size=10, color=marker_colors, line=dict(color=WHITE, width=1)),
+        customdata=df[['qtd_cnpjs_cedidos', 'pct_rating_ab', 'origem']].values,
+        hovertemplate=(
+            "<b>%{x|%d/%m/%Y %H:%M}</b><br>"
+            "Score médio: %{y:.0f}<br>"
+            "CNPJs cedidos: %{customdata[0]}<br>"
+            "%% Rating A+B: %{customdata[1]:.1f}%%<br>"
+            "Origem: %{customdata[2]}<extra></extra>"
+        ),
+    ))
+    return _fig(fig, height=320, margin=dict(l=60, r=30, t=20, b=50),
+                xaxis_title='Execução', yaxis_title='Score Médio da Carteira Cedida',
+                yaxis=dict(range=[0, 1000]))
+
 # ─────────────────────────────────────────────────────────────────────────────
 # GRÁFICOS MACROECONÔMICOS — séries BCB confirmadas
 # ─────────────────────────────────────────────────────────────────────────────
