@@ -50,13 +50,7 @@ FEATURES = [
     'media_atraso_dias',                    # média de dias de atraso como pagador
 ]
 
-RATING_COLOR = {
-    'A — Excelente':      '#00ff88',
-    'B — Bom':            '#00d4ff',
-    'C — Risco Moderado': '#ffd700',
-    'D — Risco Elevado':  '#ff6b35',
-    'E — Alto Risco':     '#ff2d55',
-}
+from theme import RATING_COLOR
 
 RATING_BINS   = [0, 300, 500, 700, 850, 1001]
 RATING_LABELS = ['E — Alto Risco', 'D — Risco Elevado', 'C — Risco Moderado', 'B — Bom', 'A — Excelente']

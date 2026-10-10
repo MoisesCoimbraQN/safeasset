@@ -4,7 +4,7 @@
 # Conecta o frontend (layout.py) com os dados (pipeline.py) e gráficos (charts.py)
 # =============================================================================
 
-import base64, io
+import base64, io, threading
 import numpy as np
 import pandas as pd
 
@@ -24,9 +24,27 @@ except ImportError:
 
 # Aliases de compatibilidade — tema escuro
 DARK   = WHITE    # texto claro sobre fundo escuro
-AMBER  = '#F59E0B'  # âmbar — usado em alertas e destaques
+AMBER  = '#D4A94E'  # âmbar — usado em alertas e destaques
 BG_MAIN = CARD_BG # fundo dos cards
 from pipeline import RATING_COLOR
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CACHE DE PIPELINE (em memória do processo)
+#
+# Guarda o resultado completo da última "Executar Análise Histórica" —
+# incluindo DataFrames e modelos treinados, sem round-trip por JSON/Store.
+# Filtros, análise de carteira nova e downloads leem daqui em vez de rodar
+# pl.run_pipeline() de novo — só os botões de treino (Executar Análise
+# Histórica / Aplicar Parâmetros ML / Aplicar Detecção de Fraude) escrevem
+# aqui. Funciona porque o Render roda WEB_CONCURRENCY=1 (um único worker) —
+# se um dia o deploy for multi-worker, isso precisa virar um cache
+# compartilhado (Redis, etc.), já que cada worker teria sua própria cópia.
+# ─────────────────────────────────────────────────────────────────────────────
+_PIPELINE_CACHE = {
+    'R': None,          # dict completo retornado por pl.run_pipeline() + extras
+    'df_aux': None,      # base auxiliar usada no último treino (para ind_risco)
+    'df_bol_raw': None,  # base de boletos crua usada no último treino (idem)
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPER — parse de upload CSV
@@ -244,39 +262,30 @@ def register_callbacks(app):
     def clear_filters(_):
         return '', [], [], None, None
 
-    # ── CALLBACK PRINCIPAL — executa pipeline e monta dashboard ───────────
+    # ── CALLBACK 1/3 — TREINO — única fonte de pl.run_pipeline() ──────────
+    # Dispara SÓ nos botões que legitimamente pedem retreino. Filtros e
+    # carteira nova NÃO estão nos Inputs daqui de propósito.
     @app.callback(
-        Output('main-content',   'children'),
-        Output('loading-output', 'children'),
-        Output('store-df-full',  'data'),
+        Output('main-content',   'children', allow_duplicate=True),
+        Output('loading-output', 'children', allow_duplicate=True),
+        Output('store-df-full',  'data',     allow_duplicate=True),
         Input('btn-run',         'n_clicks'),
         Input('btn-run-upload',  'n_clicks'),
         Input('btn-run-ml',      'n_clicks'),
         Input('btn-run-fraud',   'n_clicks'),
-        Input('btn-run-cart',    'n_clicks'),
-        Input('flt-cnpj',        'value'),
-        Input('flt-uf',          'value'),
-        Input('flt-cnae',        'value'),
-        Input('flt-date',        'start_date'),
-        Input('flt-date',        'end_date'),
         State('store-raw-aux',   'data'),
         State('store-raw-bol',   'data'),
-        State('store-raw-cart',  'data'),
         State('sl-test',  'value'),
         State('sl-trees', 'value'),
         State('sl-dup-thresh',  'value'),
         State('sl-emit-thresh', 'value'),
         prevent_initial_call=True,
     )
-    
-    def run_dashboard(run_clicks, run_upload_clicks, ml_clicks, fraud_clicks,
-                      cart_clicks,
-                      cnpj_q, sel_ufs, sel_cnaes, date_from, date_to,
-                      aux_json_input, bol_json, cart_json,
-                      test_size, n_trees, dup_thresh, emit_thresh):
+    def processar_historico(run_clicks, run_upload_clicks, ml_clicks, fraud_clicks,
+                            aux_json_input, bol_json,
+                            test_size, n_trees, dup_thresh, emit_thresh):
 
         from dash.exceptions import PreventUpdate
-        from dash import ctx
 
         if not aux_json_input and not bol_json:
             raise PreventUpdate
@@ -309,26 +318,11 @@ def register_callbacks(app):
             return html.Div(f'❌ Erro ao ler base de boletos: {e}',
                             style={'color': WARN, 'padding': '40px'}), '', None
 
-        # ── Aplicar filtros globais ───────────────────────────────────────
-        if cnpj_q:
-            df_aux = df_aux[df_aux['id_cnpj'].astype(str).str.lower()
-                            .str.contains(cnpj_q.strip().lower(), na=False)]
-        if sel_ufs:
-            df_aux = df_aux[df_aux['uf'].isin(sel_ufs)]
-        if sel_cnaes:
-            df_aux = df_aux[df_aux['cd_cnae_prin'].astype(str).isin(sel_cnaes)]
-        if df_bol is not None and (date_from or date_to):
-            ds = pd.to_datetime(df_bol['dt_emissao'], errors='coerce')
-            if date_from: df_bol = df_bol[ds >= pd.Timestamp(date_from)]
-            if date_to:   df_bol = df_bol[ds <= pd.Timestamp(date_to)]
-            valid = set(df_bol['id_pagador'].tolist())
-            if valid: df_aux = df_aux[df_aux['id_cnpj'].isin(valid)]
-
         if len(df_aux) < 10:
-            return html.Div('⚠️ Filtro muito restritivo — poucos dados disponíveis.',
+            return html.Div('⚠️ Base auxiliar com poucos dados.',
                             style={'color': WARN, 'padding': '40px', 'textAlign': 'center'}), '', None
 
-        # ── Executar pipeline ─────────────────────────────────────────────
+        # ── Executar pipeline (ÚNICO lugar que treina os modelos) ─────────
         try:
             R = pl.run_pipeline(
                 df_aux.copy(), df_bol.copy(),
@@ -345,25 +339,16 @@ def register_callbacks(app):
                 html.Div('❌ Erro ao executar o pipeline:',
                          style={'color': WARN, 'fontWeight': '700', 'marginBottom': '8px'}),
                 html.Pre(traceback.format_exc(),
-                         style={'color': MUTED, 'fontSize': '11px', 'background': '#0d1b2a',
+                         style={'color': MUTED, 'fontSize': '11px', 'background': '#0E1319',
                                 'padding': '12px', 'borderRadius': '6px', 'overflow': 'auto'}),
             ], style={'padding': '24px'}), '', None
 
         run_id = st.novo_run_id()
 
-        # ── Análise da carteira nova (se disponível) ──────────────────────
-        df_cart = read_json(cart_json) if cart_json else None
-        if df_cart is not None and len(df_cart) > 0:
-            from pipeline import calcular_cobertura_carteira
-            cobertura = calcular_cobertura_carteira(R['df_full'], df_cart)
-            R['cobertura']    = cobertura
-            R['df_carteira']  = df_cart
-            perfil_cedentes_novo = pl.calcular_perfil_beneficiario(df_cart, R['df_full'])
-            st.salvar_historico_cedente(run_id, perfil_cedentes_novo, origem='carteira_nova')
-        else:
-            R['cobertura']   = None
-            R['df_carteira'] = None
-
+        # Retreinou — carteira nova anterior fica obsoleta contra o modelo
+        # novo; usuário precisa clicar "Analisar Carteira Nova" de novo.
+        R['cobertura']   = None
+        R['df_carteira'] = None
 
         # ── Calcular Indicador de Risco Setorial ──────────────────────────
         try:
@@ -374,19 +359,129 @@ def register_callbacks(app):
             print(f"[SafeAsset] ind_risco erro: {_e}")
             R['ind_risco'] = None
 
+        # ── Guarda no cache do processo — fonte pra filtros/cart/downloads ─
+        _PIPELINE_CACHE['R']          = R
+        _PIPELINE_CACHE['df_aux']     = df_aux
+        _PIPELINE_CACHE['df_bol_raw'] = df_bol
+
         # ── Montar dashboard ──────────────────────────────────────────────
         dashboard = build_dashboard(R, 0.65, 800,
                                      dup_thresh  or 0.05,
                                      emit_thresh or 10)
         df_full_json = R['df_full'].to_json(date_format='iso', orient='split')
 
-        st.salvar_snapshot_s3(run_id, aux=df_aux, bol=df_bol, df_full=R['df_full'])
-        st.salvar_historico_cnpj(run_id, R['df_full'])
-        perfil_cedentes_hist = pl.calcular_perfil_beneficiario(df_bol, R['df_full'])
-        st.salvar_historico_cedente(run_id, perfil_cedentes_hist, origem='historico')
+        threading.Thread(
+            target=lambda: (
+                st.salvar_snapshot_s3(run_id, aux=df_aux, bol=df_bol, df_full=R['df_full']),
+                st.salvar_historico_cnpj(run_id, R['df_full']),
+                st.salvar_historico_cedente(
+                    run_id, pl.calcular_perfil_beneficiario(df_bol, R['df_full']),
+                    origem='historico'),
+            ),
+            daemon=True,
+        ).start()
+
         return dashboard, '', df_full_json
 
-       
+    # ── CALLBACK 2/3 — FILTROS — sem retreino, lê do cache de pipeline ────
+    @app.callback(
+        Output('main-content',   'children', allow_duplicate=True),
+        Output('loading-output', 'children', allow_duplicate=True),
+        Output('store-df-full',  'data',     allow_duplicate=True),
+        Input('flt-cnpj',        'value'),
+        Input('flt-uf',          'value'),
+        Input('flt-cnae',        'value'),
+        Input('flt-date',        'start_date'),
+        Input('flt-date',        'end_date'),
+        State('sl-dup-thresh',  'value'),
+        State('sl-emit-thresh', 'value'),
+        prevent_initial_call=True,
+    )
+    def aplicar_filtros(cnpj_q, sel_ufs, sel_cnaes, date_from, date_to,
+                        dup_thresh, emit_thresh):
+        from dash.exceptions import PreventUpdate
+
+        R_base = _PIPELINE_CACHE['R']
+        if R_base is None:
+            raise PreventUpdate
+
+        df_full = R_base['df_full'].copy()
+        if cnpj_q:
+            df_full = df_full[df_full['id_cnpj'].astype(str).str.lower()
+                              .str.contains(cnpj_q.strip().lower(), na=False)]
+        if sel_ufs:
+            df_full = df_full[df_full['uf'].isin(sel_ufs)]
+        if sel_cnaes:
+            df_full = df_full[df_full['cd_cnae_prin'].astype(str).isin(sel_cnaes)]
+        if date_from or date_to:
+            df_bol_full = R_base['df_bol']
+            ds = pd.to_datetime(df_bol_full['dt_emissao'], errors='coerce')
+            df_bol_f = df_bol_full
+            if date_from: df_bol_f = df_bol_f[ds >= pd.Timestamp(date_from)]
+            if date_to:   df_bol_f = df_bol_f[ds <= pd.Timestamp(date_to)]
+            valid = set(df_bol_f['id_pagador'].tolist())
+            if valid:
+                df_full = df_full[df_full['id_cnpj'].isin(valid)]
+
+        if len(df_full) < 10:
+            return html.Div('⚠️ Filtro muito restritivo — poucos dados disponíveis.',
+                            style={'color': WARN, 'padding': '40px', 'textAlign': 'center'}), '', no_update
+
+        # Reusa tudo que já foi treinado (ML, fraude, perfil CNAE, ind_risco)
+        # — só a visão de CNPJs exibida muda, nada é recalculado do zero.
+        R_view = dict(R_base)
+        R_view['df_full'] = df_full
+        dashboard = build_dashboard(R_view, 0.65, 800,
+                                     dup_thresh  or 0.05,
+                                     emit_thresh or 10)
+        df_full_json = df_full.to_json(date_format='iso', orient='split')
+        return dashboard, '', df_full_json
+
+    # ── CALLBACK 3/3 — CARTEIRA NOVA — sem retreino, lê do cache ──────────
+    @app.callback(
+        Output('main-content',   'children', allow_duplicate=True),
+        Output('loading-output', 'children', allow_duplicate=True),
+        Output('store-df-full',  'data',     allow_duplicate=True),
+        Input('btn-run-cart',    'n_clicks'),
+        State('store-raw-cart',  'data'),
+        State('sl-dup-thresh',  'value'),
+        State('sl-emit-thresh', 'value'),
+        prevent_initial_call=True,
+    )
+    def analisar_carteira_nova(cart_clicks, cart_json, dup_thresh, emit_thresh):
+        from dash.exceptions import PreventUpdate
+
+        R = _PIPELINE_CACHE['R']
+        if R is None:
+            return html.Div(
+                '⚠️ Execute a Análise Histórica (base auxiliar + boletos) antes de analisar a carteira nova.',
+                style={'color': WARN, 'padding': '40px', 'textAlign': 'center'}), '', no_update
+
+        df_cart = read_json(cart_json) if cart_json else None
+        if df_cart is None or len(df_cart) == 0:
+            raise PreventUpdate
+
+        from pipeline import calcular_cobertura_carteira
+        cobertura = calcular_cobertura_carteira(R['df_full'], df_cart)
+        R['cobertura']   = cobertura
+        R['df_carteira'] = df_cart
+        # mutou o dict em cache — persiste pra próxima vez que filtros/
+        # downloads lerem o cache, sem precisar reanalizar a carteira nova
+
+        run_id = st.novo_run_id()
+        perfil_cedentes_novo = pl.calcular_perfil_beneficiario(df_cart, R['df_full'])
+        threading.Thread(
+            target=st.salvar_historico_cedente,
+            args=(run_id, perfil_cedentes_novo, 'carteira_nova'),
+            daemon=True,
+        ).start()
+
+        dashboard = build_dashboard(R, 0.65, 800,
+                                     dup_thresh  or 0.05,
+                                     emit_thresh or 10)
+        df_full_json = R['df_full'].to_json(date_format='iso', orient='split')
+        return dashboard, '', df_full_json
+
 
     # ── Filtros do ranking ─────────────────────────────────────────────────
     @app.callback(
@@ -452,15 +547,15 @@ def register_callbacks(app):
         prevent_initial_call=True,
     )
     def download_conhecidos(n_clicks, aux_json, bol_json, cart_json):
-        if not n_clicks or not aux_json or not bol_json or not cart_json:
+        if not n_clicks or not cart_json:
+            from dash.exceptions import PreventUpdate
+            raise PreventUpdate
+        R = _PIPELINE_CACHE['R']
+        if R is None:
             from dash.exceptions import PreventUpdate
             raise PreventUpdate
         try:
-            import pipeline as pl
-            df_aux  = read_json(aux_json)
-            df_bol  = read_json(bol_json)
             df_cart = read_json(cart_json)
-            R = pl.run_pipeline(df_aux.copy(), df_bol.copy())
             df_full = R['df_full']
             col_pag = 'id_pagador' if 'id_pagador' in df_cart.columns else 'id_cnpj'
             conhecidos = set(df_cart[col_pag].astype(str)) & set(df_full['id_cnpj'].astype(str))
@@ -489,17 +584,15 @@ def register_callbacks(app):
         prevent_initial_call=True,
     )
     def download_analise(n_clicks, aux_json, bol_json):
-        if not n_clicks or not aux_json or not bol_json:
+        if not n_clicks:
+            from dash.exceptions import PreventUpdate
+            raise PreventUpdate
+        R = _PIPELINE_CACHE['R']
+        if R is None:
             from dash.exceptions import PreventUpdate
             raise PreventUpdate
 
         try:
-            df_aux = read_json(aux_json)
-            df_bol = read_json(bol_json)
-
-            # Rodar pipeline mínimo para obter df_full com score e divergência
-            import pipeline as pl
-            R = pl.run_pipeline(df_aux.copy(), df_bol.copy())
             df = R['df_full']
 
             # Selecionar CNPJs com alerta de divergência
@@ -538,14 +631,14 @@ def register_callbacks(app):
         prevent_initial_call=True,
     )
     def download_novos(n_clicks, aux_json, bol_json):
-        if not n_clicks or not aux_json or not bol_json:
+        if not n_clicks:
+            from dash.exceptions import PreventUpdate
+            raise PreventUpdate
+        R = _PIPELINE_CACHE['R']
+        if R is None:
             from dash.exceptions import PreventUpdate
             raise PreventUpdate
         try:
-            import pipeline as pl
-            df_aux = read_json(aux_json)
-            df_bol = read_json(bol_json)
-            R = pl.run_pipeline(df_aux.copy(), df_bol.copy())
             df = R['df_full']
             df_exp = df[df['sem_historico'] == 1].copy() if 'sem_historico' in df.columns else df
             cols = ['id_cnpj','uf','cd_cnae_prin','score_fidc','rating_carteira',
@@ -571,7 +664,7 @@ def register_callbacks(app):
         prevent_initial_call=True,
     )
     def update_macro_content(tab_ativa, macro_store_json, aux_json, bol_json):
-        if tab_ativa != 'tab-macro':
+        if tab_ativa != 'tab-outras':
             from dash.exceptions import PreventUpdate
             raise PreventUpdate
         if not aux_json or not bol_json:
@@ -722,7 +815,7 @@ def register_callbacks(app):
                             'referência de contexto macroeconômico para todos os setores.',
                             style={'fontSize': '11px', 'color': MUTED, 'fontStyle': 'italic'}),
                     ], style={
-                        'background': '#0a1520', 'border': f'1px solid {BORDER}',
+                        'background': '#0E1319', 'border': f'1px solid {BORDER}',
                         'borderRadius': '8px', 'padding': '8px 14px', 'marginBottom': '16px',
                     }),
                     dbc.Row([
@@ -752,7 +845,7 @@ def register_callbacks(app):
                                 '📋 Nota BCB (Set/2025): cerca de 70% do aumento da inadimplência '
                                 'desde jan/2025 é metodológico (novas regras contábeis), '
                                 'não deterioração real do crédito.',
-                                style={'fontSize': '11px', 'color': '#c8a84b',
+                                style={'fontSize': '11px', 'color': '#D4A94E',
                                        'fontStyle': 'italic', 'marginTop': '10px'})]
                             if ir.get('z_score', 0) > 0 else []),
                         ], width=5),
@@ -840,7 +933,7 @@ def register_callbacks(app):
                 html.Div('❌ Erro ao carregar dados macro:',
                          style={'color': WARN, 'fontWeight': '700', 'marginBottom': '8px'}),
                 html.Pre(err,
-                         style={'color': MUTED, 'fontSize': '10px', 'background': '#0d1b2a',
+                         style={'color': MUTED, 'fontSize': '10px', 'background': '#0E1319',
                                 'padding': '12px', 'borderRadius': '6px', 'overflow': 'auto',
                                 'maxHeight': '300px'}),
             ], style={'padding': '24px'})
@@ -987,7 +1080,7 @@ def register_callbacks(app):
                 style_data_conditional=[
                     {'if': {'filter_query': f'{{rating_carteira}} = "{r}"'}, 'color': RATING_COLOR.get(r, 'white'), 'fontWeight': '600'}
                     for r in RATING_COLOR
-                ] + [{'if': {'row_index': 'odd'}, 'backgroundColor': '#0d1b2a'}],
+                ] + [{'if': {'row_index': 'odd'}, 'backgroundColor': '#0E1319'}],
             ),
         ])
 
@@ -1171,22 +1264,22 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
 
     # ── TAB STYLES — diferenciação por grupo ─────────────────────────────
     # Neutro: Resumo (visão consolidada — pertence aos dois grupos)
-    TAB_NEUT_STYLE = {'color': '#8a8a85', 'background': CARD_BG,
-                      'borderBottom': '2px solid #5F5E5A'}
-    TAB_NEUT_SEL   = {'color': '#F1EFE8', 'background': '#5F5E5A',
-                      'fontWeight': '700', 'borderBottom': '2px solid #B4B2A9'}
+    TAB_NEUT_STYLE = {'color': '#9BA5B3', 'background': CARD_BG,
+                      'borderBottom': '2px solid #2B333F'}
+    TAB_NEUT_SEL   = {'color': '#EDEFF2', 'background': '#2B333F',
+                      'fontWeight': '700', 'borderBottom': '2px solid #9BA5B3'}
 
     # Azul: Análise Histórica (PCR)
-    TAB_HIST_STYLE = {'color': '#6aa8d8', 'background': CARD_BG,
-                      'borderBottom': '2px solid #185FA5'}
-    TAB_HIST_SEL   = {'color': '#E6F1FB', 'background': '#185FA5',
-                      'fontWeight': '700', 'borderBottom': '2px solid #85B7EB'}
+    TAB_HIST_STYLE = {'color': '#9CC1E0', 'background': CARD_BG,
+                      'borderBottom': '2px solid #5B9BD5'}
+    TAB_HIST_SEL   = {'color': '#EDEFF2', 'background': '#5B9BD5',
+                      'fontWeight': '700', 'borderBottom': '2px solid #9CC1E0'}
 
     # Verde: Decisão de Aquisição
-    TAB_ACQ_STYLE  = {'color': '#7ab356', 'background': CARD_BG,
-                      'borderBottom': '2px solid #3B6D11'}
-    TAB_ACQ_SEL    = {'color': '#EAF3DE', 'background': '#3B6D11',
-                      'fontWeight': '700', 'borderBottom': '2px solid #97C459'}
+    TAB_ACQ_STYLE  = {'color': '#9CD3B6', 'background': CARD_BG,
+                      'borderBottom': '2px solid #5FB38A'}
+    TAB_ACQ_SEL    = {'color': '#EDEFF2', 'background': '#5FB38A',
+                      'fontWeight': '700', 'borderBottom': '2px solid #9CD3B6'}
 
     # Aliases de compatibilidade para abas que usavam tab_style/tab_sel inline
     tab_style = TAB_HIST_STYLE
@@ -1213,7 +1306,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
         children=[
 
             # ── RESUMO INDICATIVO ─────────────────────────────────────────
-            dcc.Tab(label='📋 Resumo', value='tab-resumo',
+            dcc.Tab(label='Resumo', value='tab-resumo',
                     style=TAB_NEUT_STYLE,
                     selected_style=TAB_NEUT_SEL,
               children=[html.Div(style={'padding': '24px'}, children=[
@@ -1230,9 +1323,9 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                 # ════════════════════════════════════════════════════════
                 html.Div([
                     html.Div(style={
-                        'background': '#0c1e35',
-                        'border': f'1px solid #185FA5',
-                        'borderLeft': '4px solid #185FA5',
+                        'background': '#141B22',
+                        'border': f'1px solid #5B9BD5',
+                        'borderLeft': '4px solid #5B9BD5',
                         'borderRadius': '10px',
                         'padding': '12px 20px',
                         'marginBottom': '16px',
@@ -1240,13 +1333,13 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                     }, children=[
                         html.Span('[H]', style={
                             'fontSize': '11px', 'fontWeight': '700',
-                            'background': '#185FA5', 'color': '#E6F1FB',
+                            'background': '#5B9BD5', 'color': '#EDEFF2',
                             'padding': '2px 8px', 'borderRadius': '4px',
                             'letterSpacing': '0.05em',
                         }),
                         html.Span('ANÁLISE HISTÓRICA — Base PCR',
                                   style={'fontSize': '14px', 'fontWeight': '700',
-                                         'color': '#85B7EB'}),
+                                         'color': '#9CC1E0'}),
                         html.Span('Dados históricos de sacados — treino do modelo e diagnóstico da carteira passada',
                                   style={'fontSize': '11px', 'color': MUTED}),
                     ]),
@@ -1264,7 +1357,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                                   style={'fontSize': '10px', 'color': MUTED}),
                     ], style={'marginTop': '8px'}),
                     *([html.Div([
-                        *[html.Div(nota, style={'fontSize': '11px', 'color': '#c8a84b',
+                        *[html.Div(nota, style={'fontSize': '11px', 'color': '#D4A94E',
                                                'fontStyle': 'italic', 'marginTop': '6px'})
                           for nota in _notas],
                     ])] if _notas else []),
@@ -1323,8 +1416,8 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                 *([card([
                     html.Div('2 — Score ML Auxiliar (indicador contínuo de risco)',
                              style={'fontSize': '15px', 'fontWeight': '700',
-                                    'color': '#a78bfa', 'marginBottom': '16px',
-                                    'borderLeft': '4px solid #a78bfa',
+                                    'color': '#7D8FB3', 'marginBottom': '16px',
+                                    'borderLeft': '4px solid #7D8FB3',
                                     'paddingLeft': '10px'}),
                     html.Div(f'Modelo: {best_name.split()[0]}  ·  AUC {ml[best_name]["auc"]:.4f}  ·  '
                              f'Quanto maior, menor o risco segundo o comportamento dos boletos',
@@ -1333,7 +1426,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                         dbc.Col(kpi('Score ML Médio',
                             f'{df_full["prob_ml_bom"].mean():.1f}%',
                             f'Mediana: {df_full["prob_ml_bom"].median():.1f}%',
-                            '#a78bfa'), width=3),
+                            '#7D8FB3'), width=3),
                         dbc.Col(kpi('Score ML Alto (≥ 40%)',
                             f'{int((df_full["prob_ml_bom"] >= 40).sum()):,}',
                             f'{(df_full["prob_ml_bom"] >= 40).mean()*100:.1f}% — sinal positivo',
@@ -1345,7 +1438,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                         dbc.Col(kpi('AUC-ROC',
                             f'{ml[best_name]["auc"]:.4f}',
                             f'{best_name.split()[0]} — poder preditivo',
-                            '#a78bfa'), width=3),
+                            '#7D8FB3'), width=3),
                     ], className='g-3'),
                     html.Div([
                         html.Span('ℹ️  ', style={'fontSize': '14px'}),
@@ -1355,7 +1448,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                             'Use em conjunto com o Score FIDC para uma visão complementar.',
                             style={'fontSize': '11px', 'color': MUTED}),
                     ], style={'marginTop': '12px', 'padding': '8px 12px',
-                              'background': '#0a1e30', 'borderRadius': '6px',
+                              'background': '#141B22', 'borderRadius': '6px',
                               'border': f'1px solid {BORDER}'}),
                 ])] if 'prob_ml_bom' in df_full.columns else []),
 
@@ -1453,7 +1546,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
 
                 # Recomendação textual histórica
                 html.Div(style={
-                    'background': '#0a1e30', 'border': f'1px solid {BORDER}',
+                    'background': '#141B22', 'border': f'1px solid {BORDER}',
                     'borderLeft': f'4px solid {ACCENT2}',
                     'borderRadius': '10px', 'padding': '16px 20px', 'marginTop': '8px',
                 }, children=[
@@ -1479,9 +1572,9 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                 *([html.Div([
 
                     html.Div(style={
-                        'background': '#0e1f0a',
-                        'border': f'1px solid #3B6D11',
-                        'borderLeft': '4px solid #3B6D11',
+                        'background': '#131C17',
+                        'border': f'1px solid #5FB38A',
+                        'borderLeft': '4px solid #5FB38A',
                         'borderRadius': '10px',
                         'padding': '12px 20px',
                         'marginTop': '32px',
@@ -1490,13 +1583,13 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                     }, children=[
                         html.Span('[A]', style={
                             'fontSize': '11px', 'fontWeight': '700',
-                            'background': '#3B6D11', 'color': '#EAF3DE',
+                            'background': '#5FB38A', 'color': '#EDEFF2',
                             'padding': '2px 8px', 'borderRadius': '4px',
                             'letterSpacing': '0.05em',
                         }),
                         html.Span('DECISÃO DE AQUISIÇÃO — Carteira Nova',
                                   style={'fontSize': '14px', 'fontWeight': '700',
-                                         'color': '#97C459'}),
+                                         'color': '#9CD3B6'}),
                         html.Span('Análise dos CNPJs da carteira em avaliação',
                                   style={'fontSize': '11px', 'color': MUTED}),
                     ]),
@@ -1541,7 +1634,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                             f'({R["cobertura"]["pct_sem_historico"]:.1f}%) não possuem histórico PCR. '
                             'O modelo usou imputação pela mediana — análise individual obrigatória '
                             'antes da aquisição desses títulos.',
-                            style={'fontSize': '11px', 'color': '#c8a84b',
+                            style={'fontSize': '11px', 'color': '#D4A94E',
                                    'fontStyle': 'italic'}),
                     ], style={'marginTop': '10px'})]
                     if R['cobertura']['sem_historico'] > 0 else []),
@@ -1626,13 +1719,13 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
 
                     # ── Recomendação Automática — Carteira Nova ───────────
                     html.Div(style={
-                        'background': '#0a1e0e', 'border': f'1px solid #3B6D11',
-                        'borderLeft': '4px solid #97C459',
+                        'background': '#131C17', 'border': f'1px solid #5FB38A',
+                        'borderLeft': '4px solid #9CD3B6',
                         'borderRadius': '10px', 'padding': '16px 20px', 'marginTop': '16px',
                     }, children=[
                         html.Div('📌 Recomendação Automática — Carteira Nova',
                                  style={'fontSize': '13px', 'fontWeight': '700',
-                                        'color': '#97C459', 'marginBottom': '10px'}),
+                                        'color': '#9CD3B6', 'marginBottom': '10px'}),
                         html.Div([
                             # CNPJs com histórico
                             *([html.Span(
@@ -1671,7 +1764,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                             # Ação recomendada
                             html.Span(
                                 'Acesse as abas [A] ⚠️ Novos e [A] ✅ Histórico para análise detalhada.',
-                                style={'color': '#97C459', 'fontStyle': 'italic'}
+                                style={'color': '#9CD3B6', 'fontStyle': 'italic'}
                             ),
                         ], style={'fontSize': '13px', 'color': WHITE, 'lineHeight': '1.9'}),
                     ]),
@@ -1681,7 +1774,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
               ])]),
 
             # ════ ANÁLISE HISTÓRICA ═══════════════════════════════════════
-            dcc.Tab(label='[H] 📊 EDA', value='tab-eda', style=TAB_HIST_STYLE, selected_style=TAB_HIST_SEL,
+            dcc.Tab(label='[H] EDA', value='tab-eda', style=TAB_HIST_STYLE, selected_style=TAB_HIST_SEL,
               children=[html.Div(style={'padding': '24px'}, children=[
                 section_title('2–3. Análise Exploratória', 'Distribuições, nulos, volumes temporais'),
                 card([html.Div('Nulos por Coluna (%) — CNPJs com boletos', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_nulos(df_full[df_full['sem_historico'] == 0]))]),                card([html.Div('Distribuição dos Scores de Crédito', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_scores(df_full))]),
@@ -1709,7 +1802,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
               ])]),
 
             # ── ANÁLISE DE FRAUDE ─────────────────────────────────────────
-            dcc.Tab(label='[H] 🚨 Fraude', value='tab-fraude', style=TAB_HIST_STYLE, selected_style={**TAB_HIST_SEL, 'background': WARN, 'color': NAVY},
+            dcc.Tab(label='[H] Fraude', value='tab-fraude', style=TAB_HIST_STYLE, selected_style={**TAB_HIST_SEL, 'background': WARN, 'color': NAVY},
               children=[html.Div(style={'padding': '24px'}, children=[
                 section_title('2B. Detecção de Boletos Duplicados',
                     f'Threshold: ≥ {fraude_stats["pct_dup_thresh"]*100:.0f}% duplicados  OU  ≥ {fraude_stats["n_emit_thresh"]} emitentes distintos'),
@@ -1772,8 +1865,8 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                                           'color': WARN, 'border': f'1px solid {BORDER}', 'fontSize': '12px'},
                             style_data_conditional=[
                                 {'if': {'filter_query': '{Motivo} contains "Duplicatas" && {Motivo} contains "Emitentes"'},
-                                 'backgroundColor': '#2d0a0a', 'color': '#ff6b6b', 'fontWeight': '600'},
-                                {'if': {'row_index': 'odd'}, 'backgroundColor': '#0d1b2a'},
+                                 'backgroundColor': '#1C1514', 'color': '#D16760', 'fontWeight': '600'},
+                                {'if': {'row_index': 'odd'}, 'backgroundColor': '#0E1319'},
                             ],
                         )
                     ]),
@@ -1797,50 +1890,9 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
               ])]),
 
 
-            # ── TARGET & CORRELAÇÃO ───────────────────────────────────────
-            dcc.Tab(label='[H] 🎯 Target & Correlação', style=TAB_HIST_STYLE, selected_style=TAB_HIST_SEL,
-              children=[html.Div(style={'padding': '24px'}, children=[
-                section_title('5–6. Target e Correlação',
-                    f'Adimplência real: target=1 se sacado sem boletos inadimplentes reais · Parâmetros usados como fallback'),
-                card([html.Div('Distribuição do Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_target_pizza(df_full))]),
-                card([html.Div('Score Materialidade Evolução por Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_boxplot_target(df_full, 'score_materialidade_evolucao', 'Score Materialidade Evolução por Target'))]),
-                card([html.Div('Liquidez Sacado (1m) por Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_boxplot_target(df_full, 'sacado_indice_liquidez_1m', 'Índice de Liquidez (1m)'))]),
-                card([html.Div('Correlação com o Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_correlacao_target(corr_mat))]),
-                card([html.Div('Matriz de Correlação Completa (Pearson)', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_heatmap_correlacao(corr_mat))]),
-              ])]),
-
-            # ── MODELAGEM ─────────────────────────────────────────────────
-            dcc.Tab(label='[H] 🤖 Modelagem', value='tab-ml', style=TAB_HIST_STYLE, selected_style=TAB_HIST_SEL,
-              children=[html.Div(style={'padding': '24px'}, children=[
-                section_title('7–8. Modelagem Preditiva', 'Pipeline: Imputer → Scaler → Modelo · Cross-Validation k=5'),
-                card([
-                    html.Div('Comparação de Modelos — Métricas', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '12px'}),
-                    dash_table.DataTable(
-                        data=[{'Modelo': n, 'CV AUC (treino)': f"{r['cv_mean']:.4f} ± {r['cv_std']:.4f}",
-                               'Test AUC': f"{r['auc']:.4f}", 'Test AP': f"{r['ap']:.4f}"}
-                              for n, r in ml.items()],
-                        columns=[{'name': c, 'id': c} for c in ['Modelo', 'CV AUC (treino)', 'Test AUC', 'Test AP']],
-                        style_table={'overflowX': 'auto'},
-                        style_cell={'backgroundColor': CARD_BG, 'color': WHITE, 'border': f'1px solid {BORDER}',
-                                    'fontFamily': 'Space Grotesk', 'fontSize': '13px', 'padding': '12px 16px', 'textAlign': 'left'},
-                        style_header={'backgroundColor': BLUE, 'fontWeight': '700', 'color': ACCENT,
-                                      'border': f'1px solid {BORDER}', 'fontSize': '13px'},
-                        style_data_conditional=[{'if': {'filter_query': f'{{Modelo}} = "{best_name}"'},
-                                                 'backgroundColor': '#0d2b1a', 'color': ACCENT2, 'fontWeight': '600'}],
-                    ),
-                ]),
-                card([html.Div('AUC-ROC por Fold — Cross-Validation (k=5)', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_cv_folds(ml))]),
-                card([html.Div('CV AUC vs Test AUC — comparação entre modelos', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_cv_vs_test(ml))]),
-                card([html.Div(f'Importância das Features — {best_name}', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_feature_importance(feat_imp, best_name))]),
-                html.Hr(style={'borderColor': BORDER, 'margin': '20px 0'}),
-                section_title('Avaliação dos Modelos', 'Curvas ROC e Matrizes de Confusão'),
-                card([html.Div('Curvas ROC — Comparação entre Modelos', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_roc(ml))]),
-                card([html.Div('Matrizes de Confusão — por Modelo', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_confusion_matrix(ml))]),
-              ])]),
-
 
             # ── SCORE FINAL ───────────────────────────────────────────────
-            dcc.Tab(label='[H] 🥇 Score Final', value='tab-score', style=TAB_HIST_STYLE, selected_style=TAB_HIST_SEL,
+            dcc.Tab(label='[H] Score Final', value='tab-score', style=TAB_HIST_STYLE, selected_style=TAB_HIST_SEL,
               children=[html.Div(style={'padding': '24px'}, children=[
                 section_title('11. Score Final de Qualidade',
                     'Fórmula composta: Liquidez Sacado (40%) + Materialidade (25%) + Quantidade (15%) + Atraso (12%) + Inadimplência (8%)'),
@@ -1885,7 +1937,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
 
                     dbc.Row([
                         dbc.Col([dcc.Input(id='rank-cnpj', placeholder='Buscar CNPJ...', debounce=True,
-                                           style={'width': '100%', 'background': '#0d1b2a', 'border': f'1px solid {BORDER}',
+                                           style={'width': '100%', 'background': '#0E1319', 'border': f'1px solid {BORDER}',
                                                   'borderRadius': '6px', 'padding': '9px 12px', 'color': WHITE,
                                                   'fontFamily': "'JetBrains Mono',monospace", 'fontSize': '12px'})], width=3),
                         dbc.Col([dcc.Dropdown(id='rank-uf',
@@ -1918,23 +1970,81 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                 ]),
               ])]),
 
-            dcc.Tab(label='[H] 🌐 Macro', value='tab-macro', style=TAB_HIST_STYLE,
-                    selected_style={**TAB_HIST_SEL, 'background': '#2563EB'},
+            # ── OUTRAS INFORMAÇÕES (Treinamento do Modelo + Macro) ────────
+            dcc.Tab(label='[H] Outras Informações', value='tab-outras',
+                    style=TAB_HIST_STYLE, selected_style=TAB_HIST_SEL,
               children=[html.Div(style={'padding': '24px'}, children=[
-                section_title('Contexto Macroeconômico — Camada 1',
-                    'Fontes: BCB SGS · IBGE SIDRA · Dados buscados automaticamente no upload'),
+                html.Details(open=False, children=[
+                    html.Summary('▶  Treinamento do Modelo — Target, Correlação e Modelagem (ML)', style={
+                        'fontWeight': '600', 'fontSize': '14px', 'color': WHITE,
+                        'cursor': 'pointer', 'padding': '12px 16px',
+                        'background': BLUE, 'borderRadius': '8px',
+                        'border': f'1px solid {BORDER}', 'listStyle': 'none',
+                        'userSelect': 'none',
+                    }),
+                    html.Div(style={'marginTop': '16px'}, children=[
 
-                html.Div(id='macro-content',
-                    children=html.Div(
-                        '🌐 Faça o upload dos dois arquivos CSV para carregar os dados macroeconômicos.',
-                        style={'color': MUTED, 'fontSize': '14px',
-                               'textAlign': 'center', 'padding': '40px'}
-                    )
-                ),
+                        section_title('5–6. Target e Correlação',
+                            f'Adimplência real: target=1 se sacado sem boletos inadimplentes reais · Parâmetros usados como fallback'),
+                        card([html.Div('Distribuição do Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_target_pizza(df_full))]),
+                        card([html.Div('Score Materialidade Evolução por Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_boxplot_target(df_full, 'score_materialidade_evolucao', 'Score Materialidade Evolução por Target'))]),
+                        card([html.Div('Liquidez Sacado (1m) por Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_boxplot_target(df_full, 'sacado_indice_liquidez_1m', 'Índice de Liquidez (1m)'))]),
+                        card([html.Div('Correlação com o Target', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_correlacao_target(corr_mat))]),
+                        card([html.Div('Matriz de Correlação Completa (Pearson)', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_heatmap_correlacao(corr_mat))]),
+
+                        html.Hr(style={'borderColor': BORDER, 'margin': '24px 0'}),
+
+                        section_title('7–8. Modelagem Preditiva', 'Pipeline: Imputer → Scaler → Modelo · Cross-Validation k=5'),
+                        card([
+                            html.Div('Comparação de Modelos — Métricas', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '12px'}),
+                            dash_table.DataTable(
+                                data=[{'Modelo': n, 'CV AUC (treino)': f"{r['cv_mean']:.4f} ± {r['cv_std']:.4f}",
+                                       'Test AUC': f"{r['auc']:.4f}", 'Test AP': f"{r['ap']:.4f}"}
+                                      for n, r in ml.items()],
+                                columns=[{'name': c, 'id': c} for c in ['Modelo', 'CV AUC (treino)', 'Test AUC', 'Test AP']],
+                                style_table={'overflowX': 'auto'},
+                                style_cell={'backgroundColor': CARD_BG, 'color': WHITE, 'border': f'1px solid {BORDER}',
+                                            'fontFamily': 'Space Grotesk', 'fontSize': '13px', 'padding': '12px 16px', 'textAlign': 'left'},
+                                style_header={'backgroundColor': BLUE, 'fontWeight': '700', 'color': ACCENT,
+                                              'border': f'1px solid {BORDER}', 'fontSize': '13px'},
+                                style_data_conditional=[{'if': {'filter_query': f'{{Modelo}} = "{best_name}"'},
+                                                         'backgroundColor': '#131C17', 'color': ACCENT2, 'fontWeight': '600'}],
+                            ),
+                        ]),
+                        card([html.Div('AUC-ROC por Fold — Cross-Validation (k=5)', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_cv_folds(ml))]),
+                        card([html.Div('CV AUC vs Test AUC — comparação entre modelos', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_cv_vs_test(ml))]),
+                        card([html.Div(f'Importância das Features — {best_name}', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_feature_importance(feat_imp, best_name))]),
+                        html.Hr(style={'borderColor': BORDER, 'margin': '20px 0'}),
+                        section_title('Avaliação dos Modelos', 'Curvas ROC e Matrizes de Confusão'),
+                        card([html.Div('Curvas ROC — Comparação entre Modelos', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_roc(ml))]),
+                        card([html.Div('Matrizes de Confusão — por Modelo', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_confusion_matrix(ml))]),
+                    ]),
+                ]),
+                html.Details(open=False, style={'marginTop': '16px'}, children=[
+                    html.Summary('▶  Contexto Macroeconômico (BCB · IBGE)', style={
+                        'fontWeight': '600', 'fontSize': '14px', 'color': WHITE,
+                        'cursor': 'pointer', 'padding': '12px 16px',
+                        'background': BLUE, 'borderRadius': '8px',
+                        'border': f'1px solid {BORDER}', 'listStyle': 'none',
+                        'userSelect': 'none',
+                    }),
+                    html.Div(style={'marginTop': '16px'}, children=[
+                        section_title('Contexto Macroeconômico — Camada 1',
+                            'Fontes: BCB SGS · IBGE SIDRA · Dados buscados automaticamente no upload'),
+
+                        html.Div(id='macro-content',
+                            children=html.Div(
+                                '🌐 Faça o upload dos dois arquivos CSV para carregar os dados macroeconômicos.',
+                                style={'color': MUTED, 'fontSize': '14px',
+                                       'textAlign': 'center', 'padding': '40px'}
+                            )
+                        ),
+                    ]),
+                ]),
               ])]),
 
             # ════ DECISÃO DE AQUISIÇÃO ════════════════════════════════════
-            dcc.Tab(label='[A] ⚠️ Novos', value='tab-novos', style=TAB_ACQ_STYLE,
+            dcc.Tab(label='[A] Novos', value='tab-novos', style=TAB_ACQ_STYLE,
                     selected_style={**TAB_ACQ_SEL, 'background': WARN, 'color': NAVY},
               children=[html.Div(style={'padding': '24px'}, children=[
 
@@ -1951,7 +2061,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                             f'{cob["sem_historico"]:,} CNPJs ({cob["pct_sem_historico"]:.1f}% da carteira) '
                             'não possuem histórico PCR. A análise preditiva não é aplicável a estes CNPJs. '
                             'Os dados abaixo subsidiam análise manual antes da decisão de aquisição.',
-                            style={'fontSize': '12px', 'color': '#c8a84b', 'fontStyle': 'italic'}),
+                            style={'fontSize': '12px', 'color': '#D4A94E', 'fontStyle': 'italic'}),
                     ], style={'marginBottom': '20px'}),
 
                     # ── Bloco 1 — Visão Geral ─────────────────────────────────
@@ -2092,7 +2202,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                         *([html.Div(
                             f'⚠️  {_fr_stats["cnpjs_suspeitos"]} CNPJs com padrões suspeitos '
                             f'detectados nos {_fr_stats["total_boletos"]} boletos da carteira nova.',
-                            style={'fontSize': '11px', 'color': '#c8a84b',
+                            style={'fontSize': '11px', 'color': '#D4A94E',
                                    'fontStyle': 'italic', 'marginTop': '10px'})]
                         if _fr_stats["cnpjs_suspeitos"] > 0 else
                         [html.Div('✅ Nenhum padrão suspeito detectado nos boletos da carteira.',
@@ -2117,7 +2227,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                                 style={'fontSize': '11px', 'color': MUTED,
                                        'fontStyle': 'italic'}),
                         ], style={
-                            'background': '#0a1520', 'border': f'1px solid {BORDER}',
+                            'background': '#0E1319', 'border': f'1px solid {BORDER}',
                             'borderRadius': '8px', 'padding': '8px 14px',
                             'marginBottom': '14px',
                         }),
@@ -2170,8 +2280,8 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                                         style={'fontSize': '10px', 'color': MUTED,
                                                'fontStyle': 'italic', 'marginTop': '8px'}),
                                 ], style={
-                                    'background': '#0c1e35',
-                                    'border': f'1px solid #185FA5',
+                                    'background': '#141B22',
+                                    'border': f'1px solid #5B9BD5',
                                     'borderRadius': '8px', 'padding': '12px 14px',
                                 }),
                             ], width=7),
@@ -2212,7 +2322,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
               ])]),
 
             # ── CARTEIRA EM AQUISIÇÃO — CNPJs COM HISTÓRICO ─────────────────
-            dcc.Tab(label='[A] ✅ Histórico',
+            dcc.Tab(label='[A] Histórico',
                     value='tab-conhecidos', style=TAB_ACQ_STYLE,
                     selected_style={**TAB_ACQ_SEL, 'background': ACCENT2, 'color': NAVY},
               children=[html.Div(style={'padding': '24px'}, children=[
@@ -2257,7 +2367,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                                 f'{df_conhecidos["prob_ml_bom"].mean():.1f}%'
                                 if 'prob_ml_bom' in df_conhecidos.columns else '—',
                                 'indicador auxiliar de risco',
-                                '#a78bfa'), width=2),
+                                '#7D8FB3'), width=2),
                         ], className='g-2'),
                     ]),
 
@@ -2337,8 +2447,8 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                                  style={'fontSize': '15px', 'color': MUTED}),
                     ], style={'textAlign': 'center', 'padding': '60px'}),
                 ]),])]),
-            dcc.Tab(label='🏦 Cedentes', value='tab-cedentes', style=tab_style,
-                selected_style={**tab_sel, 'background': '#a78bfa', 'color': NAVY},
+            dcc.Tab(label='[H] Cedentes', value='tab-cedentes', style=tab_style,
+                selected_style={**tab_sel, 'background': '#7D8FB3', 'color': NAVY},
                 children=[html.Div(style={'padding': '24px'}, children=[
                 section_title('Cedentes — Histórico de Cessões',
                 'Beneficiários que já venderam carteira ao fundo · Score e qualidade da carteira cedida'),

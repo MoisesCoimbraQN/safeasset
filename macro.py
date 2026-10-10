@@ -338,13 +338,13 @@ def calcular_score_macro_setor(indicadores: dict, setor: str,
     score = comp_inad * 0.50 + comp_selic * 0.30 + comp_ipca * 0.20
 
     if score >= p75:
-        nivel, cor = "Favorável",    "#00cc70"
+        nivel, cor = "Favorável",    "#5FB38A"
     elif score >= p25:
-        nivel, cor = "Neutro",       "#F59E0B"
+        nivel, cor = "Neutro",       "#D4A94E"
     elif score >= p25 * 0.7:
-        nivel, cor = "Atenção",      "#ff6b35"
+        nivel, cor = "Atenção",      "#D08A4E"
     else:
-        nivel, cor = "Desfavorável", "#EF4444"
+        nivel, cor = "Desfavorável", "#D16760"
 
     return {
         'score':           round(score, 1),
@@ -553,19 +553,19 @@ def calcular_indicador_risco_setorial(df_aux: pd.DataFrame,
 
     # 5. Tag
     if z <= -0.5:
-        tag, cor, emoji = 'Recomendado', '#00cc70', '✅'
+        tag, cor, emoji = 'Recomendado', '#5FB38A', '✅'
         interpretacao = (
             f"A inadimplência PJ geral está {abs(z):.2f} desvios abaixo da média "
             f"histórica dos últimos 19 meses — momento favorável para aquisição."
         )
     elif z < 0.5:
-        tag, cor, emoji = 'Regular', '#F59E0B', '🔶'
+        tag, cor, emoji = 'Regular', '#D4A94E', '🔶'
         interpretacao = (
             f"A inadimplência PJ geral está dentro da faixa histórica normal "
             f"(z-score: {z:+.2f}) — momento neutro para aquisição."
         )
     else:
-        tag, cor, emoji = 'Atenção', '#EF4444', '🚨'
+        tag, cor, emoji = 'Atenção', '#D16760', '🚨'
         interpretacao = (
             f"A inadimplência PJ geral está {z:.2f} desvios acima da média "
             f"histórica dos últimos 19 meses — momento desfavorável para aquisição."

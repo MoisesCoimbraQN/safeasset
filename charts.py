@@ -11,23 +11,13 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from pipeline import RATING_COLOR
+from theme import (NAVY, BLUE, ACCENT, ACCENT2, WARN, MUTED, BORDER,
+                    WHITE, CARD_BG, AMBER, RISK_A, RISK_B, RISK_C,
+                    RISK_D, RISK_E, EXTRA1, EXTRA2)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TEMA GLOBAL
+# TEMA GLOBAL — cores vêm de theme.py (fonte única)
 # ─────────────────────────────────────────────────────────────────────────────
-
-NAVY   = '#0a1628'
-BLUE   = '#1e3a5f'
-ACCENT = '#00d4ff'
-ACCENT2= '#00ff88'
-WARN   = '#ff6b35'
-MUTED  = '#8892a4'
-BORDER = '#1e3a5f'
-WHITE  = '#e8f0fe'
-CARD_BG = '#111d2e'
-AMBER  = '#F59E0B'
-
-from pipeline import RATING_COLOR
 
 # Template base para todos os gráficos (fundo transparente, fonte clara)
 BASE_LAYOUT = dict(
@@ -134,7 +124,7 @@ def fig_tipos_baixa(df_bol: pd.DataFrame) -> go.Figure:
     tb = df_bol['tipo_baixa'].value_counts().reset_index()
     tb.columns = ['tipo', 'qtd']
     fig = px.pie(tb, values='qtd', names='tipo', hole=0.42,
-                 color_discrete_sequence=[ACCENT, ACCENT2, WARN, '#a78bfa', '#f472b6'])
+                 color_discrete_sequence=[ACCENT, ACCENT2, WARN, EXTRA1, EXTRA2])
     return _fig(fig, height=400, margin=dict(l=20, r=20, t=20, b=20),
                 legend=dict(font=dict(size=11), orientation='v', x=0.75))
 
@@ -198,7 +188,7 @@ def fig_heatmap_correlacao(corr_mat: pd.DataFrame) -> go.Figure:
         z=corr_mat.values,
         x=corr_mat.columns.tolist(),
         y=corr_mat.index.tolist(),
-        colorscale=[[0, '#ff2d55'], [0.5, '#1e3a5f'], [1, '#00ff88']],
+        colorscale=[[0, RISK_E], [0.5, BORDER], [1, ACCENT2]],
         zmid=0, zmin=-1, zmax=1,
         text=corr_mat.round(2).values,
         texttemplate='%{text}',
@@ -541,8 +531,8 @@ def fig_score_macro_setores(scores_setor: dict) -> go.Figure:
         textposition='outside',
         textfont=dict(size=10, color=WHITE),
     ))
-    fig.add_vline(x=75, line_dash="dash", line_color="#00cc70",
-                  annotation_text="Favorável", annotation_font_color="#00cc70")
+    fig.add_vline(x=75, line_dash="dash", line_color=RISK_A,
+                  annotation_text="Favorável", annotation_font_color=RISK_A)
     fig.add_vline(x=55, line_dash="dash", line_color=WARN,
                   annotation_text="Atenção", annotation_font_color=WARN)
     return _fig(fig, height=max(300, len(scores_setor)*60),
@@ -559,7 +549,7 @@ def fig_inadimplencia_historico(historico: dict) -> go.Figure:
         'Serviços':    'inadimplencia_pj_servicos',
         'Indústria':   'inadimplencia_pj_industria',
     }
-    cores = [WARN, ACCENT, ACCENT2, '#a78bfa']
+    cores = [WARN, ACCENT, ACCENT2, EXTRA1]
     fig = go.Figure()
     for (nome, chave), cor in zip(series_plot.items(), cores):
         df = historico.get(chave, pd.DataFrame())
@@ -1140,9 +1130,9 @@ def fig_juros_duplicatas(df: 'pd.DataFrame') -> 'go.Figure':
     fig.add_trace(go.Scatter(
         x=df['data'], y=df['valor'],
         name='Juros Duplicatas (% a.a.) — BCB 20719',
-        line=dict(color='#a78bfa', width=2),
+        line=dict(color=EXTRA1, width=2),
         fill='tozeroy',
-        fillcolor='rgba(167,139,250,0.1)',
+        fillcolor='rgba(107,122,153,0.12)',
     ))
 
     # Linha de média histórica
