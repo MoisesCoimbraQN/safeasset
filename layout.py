@@ -10,7 +10,7 @@ import dash_bootstrap_components as dbc
 from pipeline import RATING_COLOR
 from theme import (NAVY, BLUE, ACCENT, ACCENT2, WARN, MUTED, CARD_BG,
                     BORDER, WHITE, DARK, BG_PAGE, BG_MAIN, AMBER,
-                    RISK_A, RISK_B, RISK_C, RISK_D, RISK_E)
+                    RISK_A, RISK_B, RISK_C, RISK_D, RISK_E, EXTRA1)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # COMPONENTES REUTILIZÁVEIS
@@ -24,29 +24,13 @@ def card(children, style=None, className=''):
     return html.Div(children, style=s, className=className)
 
 
-def _lighten(hex_color, amount=0.38):
-    """Clareia uma cor hex misturando com branco. Usado só no valor do KPI
-    (número grande), pra ficar mais vivo que a mesma cor usada nos gráficos —
-    um número isolado num card precisa de mais contraste que uma barra/linha
-    cercada de grade e rótulos."""
-    try:
-        h = hex_color.lstrip('#')
-        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-        r = min(255, int(r + (255 - r) * amount))
-        g = min(255, int(g + (255 - g) * amount))
-        b = min(255, int(b + (255 - b) * amount))
-        return f'#{r:02X}{g:02X}{b:02X}'
-    except Exception:
-        return hex_color
-
-
 def kpi(label, value, delta=None, color=ACCENT):
     return html.Div([
         html.Div(label, style={'fontSize': '11px', 'color': MUTED,
                                'letterSpacing': '1px', 'textTransform': 'uppercase',
                                'marginBottom': '6px'}),
         html.Div(value, style={'fontSize': '28px', 'fontWeight': '700',
-                               'color': _lighten(color), 'fontFamily': "'JetBrains Mono', monospace"}),
+                               'color': color, 'fontFamily': "'JetBrains Mono', monospace"}),
         html.Div(delta, style={'fontSize': '12px', 'color': MUTED,
                                'marginTop': '4px'}) if delta else None,
     ], style={'background': CARD_BG, 'border': f'1px solid {BORDER}',
@@ -111,7 +95,7 @@ def build_rank_table(df_full, cnpj_q=None, sel_ufs=None, sel_cnaes=None,
             {'if': {'filter_query': f'{{rating_carteira}} = "{r}"'},
              'color': RATING_COLOR.get(r, 'white'), 'fontWeight': '600'}
             for r in RATING_COLOR
-        ] + [{'if': {'row_index': 'odd'}, 'backgroundColor': '#0E1319'}],
+        ] + [{'if': {'row_index': 'odd'}, 'backgroundColor': '#F6F8FA'}],
     )
 
 
@@ -200,16 +184,16 @@ def build_sidebar():
             html.Div('⚙️ Parâmetros ML', style={'fontWeight': '600', 'marginBottom': '14px', 'fontSize': '14px', 'display': 'none'}),
             label_sm('Tamanho do teste'),
             dcc.Slider(id='sl-test', min=0.15, max=0.35, step=0.05, value=0.20,
-                       marks={0.15:{'label':'15%','style':{'color':'#9BA5B3','fontSize':'10px'}},0.20:{'label':'20%','style':{'color':'#5B9BD5','fontSize':'10px'}},0.25:{'label':'25%','style':{'color':'#9BA5B3','fontSize':'10px'}},0.30:{'label':'30%','style':{'color':'#9BA5B3','fontSize':'10px'}},0.35:{'label':'35%','style':{'color':'#9BA5B3','fontSize':'10px'}}},
+                       marks={0.15:{'label':'15%','style':{'color':'#5B6677','fontSize':'10px'}},0.20:{'label':'20%','style':{'color':'#1F5FA8','fontSize':'10px'}},0.25:{'label':'25%','style':{'color':'#5B6677','fontSize':'10px'}},0.30:{'label':'30%','style':{'color':'#5B6677','fontSize':'10px'}},0.35:{'label':'35%','style':{'color':'#5B6677','fontSize':'10px'}}},
                        tooltip={'always_visible': False}),
             html.Br(),
             label_sm('Árvores — Random Forest'),
             dcc.Slider(id='sl-trees', min=100, max=500, step=100, value=300,
-                       marks={100:{'label':'100','style':{'color':'#9BA5B3','fontSize':'10px'}},300:{'label':'300','style':{'color':'#5B9BD5','fontSize':'10px'}},500:{'label':'500','style':{'color':'#9BA5B3','fontSize':'10px'}}},
+                       marks={100:{'label':'100','style':{'color':'#5B6677','fontSize':'10px'}},300:{'label':'300','style':{'color':'#1F5FA8','fontSize':'10px'}},500:{'label':'500','style':{'color':'#5B6677','fontSize':'10px'}}},
                        tooltip={'always_visible': False}),
             html.Button('🔄 Aplicar Parâmetros ML', id='btn-run-ml', n_clicks=0,
-                        style={'width':'100%','background':'#2B333F','color':'#5B9BD5',
-                               'border':'1px solid #5B9BD5','borderRadius':'6px',
+                        style={'width':'100%','background':'#D3D9E2','color':'#1F5FA8',
+                               'border':'1px solid #1F5FA8','borderRadius':'6px',
                                'padding':'7px','fontWeight':'700','cursor':'pointer',
                                'fontFamily':"'Space Grotesk',sans-serif",
                                'fontSize':'11px','marginTop':'10px'}),
@@ -235,12 +219,12 @@ def build_sidebar():
                      style={'fontSize': '10px', 'color': WARN, 'marginBottom': '12px', 'fontStyle': 'italic'}),
             label_sm('% mín. boletos duplicados'),
             dcc.Slider(id='sl-dup-thresh', min=1, max=30, step=1, value=5,
-                       marks={1:{'label':'1%','style':{'color':'#9BA5B3','fontSize':'10px'}},15:{'label':'15%','style':{'color':'#9BA5B3','fontSize':'10px'}},30:{'label':'30%','style':{'color':'#9BA5B3','fontSize':'10px'}}},
+                       marks={1:{'label':'1%','style':{'color':'#5B6677','fontSize':'10px'}},15:{'label':'15%','style':{'color':'#5B6677','fontSize':'10px'}},30:{'label':'30%','style':{'color':'#5B6677','fontSize':'10px'}}},
                        tooltip={'always_visible': False}),
             html.Br(),
             label_sm('Nº mín. de emitentes distintos'),
             dcc.Slider(id='sl-emit-thresh', min=2, max=30, step=1, value=10,
-                       marks={2:{'label':'2','style':{'color':'#9BA5B3','fontSize':'10px'}},15:{'label':'15','style':{'color':'#9BA5B3','fontSize':'10px'}},30:{'label':'30','style':{'color':'#9BA5B3','fontSize':'10px'}}},
+                       marks={2:{'label':'2','style':{'color':'#5B6677','fontSize':'10px'}},15:{'label':'15','style':{'color':'#5B6677','fontSize':'10px'}},30:{'label':'30','style':{'color':'#5B6677','fontSize':'10px'}}},
                        tooltip={'always_visible': False}),
             html.Button('🔄 Aplicar Detecção de Fraude', id='btn-run-fraud', n_clicks=0,
                         style={'width': '100%', 'background': BLUE, 'color': ACCENT,
@@ -254,20 +238,20 @@ def build_sidebar():
         # Filtros globais — recolhível
         html.Details(open=False, style={'marginBottom': '12px'}, children=[
             html.Summary('🔎  Filtros Globais', style={
-                'fontWeight': '600', 'fontSize': '13px', 'color': '#7D8FB3',
+                'fontWeight': '600', 'fontSize': '13px', 'color': EXTRA1,
                 'cursor': 'pointer', 'padding': '10px 14px',
-                'background': '#2B333F', 'borderRadius': '8px',
-                'border': '1px solid #2B333F', 'listStyle': 'none',
+                'background': BLUE, 'borderRadius': '8px',
+                'border': f'1px solid {BORDER}', 'listStyle': 'none',
                 'userSelect': 'none',
             }),
-            html.Div(style={'background': '#141920', 'border': '1px solid #2B333F',
+            html.Div(style={'background': '#FFFFFF', 'border': '1px solid #D3D9E2',
                             'borderTop': 'none', 'borderRadius': '0 0 8px 8px',
                             'padding': '14px'}, children=[
             html.Div('Aplicados automaticamente ao mudar',
-                     style={'fontSize': '10px', 'color': '#5FB38A', 'marginBottom': '12px', 'fontStyle': 'italic'}),
+                     style={'fontSize': '10px', 'color': '#1E8A57', 'marginBottom': '12px', 'fontStyle': 'italic'}),
             label_sm('Buscar CNPJ'),
             dcc.Input(id='flt-cnpj', placeholder='ex: CNPJ-001', debounce=True,
-                      style={'width': '100%', 'background': '#0E1319', 'border': f'1px solid {BORDER}',
+                      style={'width': '100%', 'background': '#F6F8FA', 'border': f'1px solid {BORDER}',
                              'borderRadius': '6px', 'padding': '8px', 'color': WHITE,
                              'fontFamily': "'JetBrains Mono',monospace", 'fontSize': '12px',
                              'marginBottom': '10px'}),
@@ -297,25 +281,29 @@ def build_sidebar():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_header():
+    """Cabeçalho com a marca em destaque (sem a sequência de etapas do pipeline)."""
     return html.Div([
         html.Div([
+            # marca: quadrado com "S" + nome da plataforma grande
+            html.Div('S', style={
+                'width': '56px', 'height': '56px', 'borderRadius': '14px',
+                'background': ACCENT, 'color': '#FFFFFF',
+                'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center',
+                'fontSize': '32px', 'fontWeight': '700', 'flexShrink': '0',
+                'boxShadow': '0 4px 12px rgba(31, 95, 168, 0.28)',
+            }),
             html.Div([
-                html.Span('Safe',  style={'color': ACCENT,  'fontWeight': '700', 'fontSize': '26px'}),
-                html.Span('Asset', style={'color': WHITE,   'fontWeight': '300', 'fontSize': '26px'}),
-                html.Div('Aquisição de ativos de forma segura · FIAP + Núclea',
-                         style={'color': MUTED, 'fontSize': '12px', 'marginTop': '2px'}),
+                html.Div([
+                    html.Span('Safe',  style={'color': ACCENT, 'fontWeight': '700'}),
+                    html.Span('Asset', style={'color': WHITE,  'fontWeight': '300'}),
+                ], style={'fontSize': '44px', 'lineHeight': '1', 'letterSpacing': '-1px'}),
+                html.Div('Aquisição de ativos de forma segura  ·  FIAP + Núclea',
+                         style={'color': MUTED, 'fontSize': '13px', 'marginTop': '6px',
+                                'letterSpacing': '0.3px'}),
             ]),
-            html.Div([
-                badge_step(i, s) for i, s in enumerate([
-                    'Carga', 'Fraude', 'EDA', 'Feat.Eng',
-                    'Target', 'Correlação', 'ML+ROC',
-                    'Score', 'CNAE', 'Macro',
-                ], 1)
-            ], style={'display': 'flex', 'alignItems': 'center', 'flexWrap': 'wrap', 'gap': '6px'}),
-        ], style={'maxWidth': '1400px', 'margin': '0 auto', 'padding': '16px 24px',
-                  'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center'}),
-    ], style={'background': BLUE, 'borderBottom': f'1px solid {BORDER}',
-              'position': 'sticky', 'top': '0', 'zIndex': '100'})
+        ], style={'maxWidth': '1400px', 'margin': '0 auto', 'padding': '20px 24px',
+                  'display': 'flex', 'alignItems': 'center', 'gap': '16px'}),
+    ], style={'background': BLUE, 'borderBottom': f'1px solid {BORDER}'})
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -23,6 +23,10 @@ app = dash.Dash(
         'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700'
         '&family=JetBrains+Mono:wght@400;600&display=swap',
     ],
+    # Locale pt-BR do Plotly (meses/dias em português nos gráficos). Se não
+    # carregar, os gráficos continuam funcionando em inglês, com separadores
+    # pt-BR garantidos por layout.separators.
+    external_scripts=['https://cdn.plot.ly/plotly-locale-pt-br-latest.js'],
     suppress_callback_exceptions=True,
 )
 app.title = 'SafeAsset'

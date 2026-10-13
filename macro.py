@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from functools import lru_cache
 import pandas as pd
 import numpy as np
+from ptbr import mes_ano_pt
 
 warnings.filterwarnings('ignore')
 
@@ -117,31 +118,43 @@ def _get_json(url: str) -> dict | list | None:
         return None
 
 
-def _bcb_serie(codigo: int, n: int = 4) -> float | None:
-    """Busca o último valor disponível de uma série BCB SGS."""
-    url  = BCB_BASE.format(codigo=codigo, n=n)
-    data = _get_json(url)
-    if data and isinstance(data, list) and len(data) > 0:
-        try:
-            return float(data[-1]['valor'].replace(',', '.'))
-        except Exception:
-            return None
-    return None
+def _bcb_range_url(codigo: int, n: int) -> str:
+    """URL por intervalo de datas até HOJE. Como a URL muda a cada dia, nenhuma
+    camada de cache (proxy/CDN) devolve uma resposta antiga; a margem cobre
+    séries mensais (n meses) e diárias (n dias úteis)."""
+    hoje = datetime.now()
+    ini  = hoje - timedelta(days=int(n * 31) + 62)
+    return ("https://api.bcb.gov.br/dados/serie/bcdata.sgs.{c}/dados"
+            "?formato=json&dataInicial={i}&dataFinal={f}").format(
+                c=codigo, i=ini.strftime('%d/%m/%Y'), f=hoje.strftime('%d/%m/%Y'))
+
+
+def _parse_bcb(data) -> pd.DataFrame:
+    df = pd.DataFrame(data)
+    df['valor'] = df['valor'].astype(str).str.replace(',', '.').astype(float)
+    df['data']  = pd.to_datetime(df['data'], format='%d/%m/%Y', errors='coerce')
+    return df[['data', 'valor']].dropna().sort_values('data').reset_index(drop=True)
 
 
 def _bcb_serie_historico(codigo: int, n: int = 8) -> pd.DataFrame:
-    """Retorna série histórica de n períodos de uma série BCB SGS."""
-    url  = BCB_BASE.format(codigo=codigo, n=n)
-    data = _get_json(url)
-    if data and isinstance(data, list):
-        try:
-            df = pd.DataFrame(data)
-            df['valor'] = df['valor'].str.replace(',', '.').astype(float)
-            df['data']  = pd.to_datetime(df['data'], format='%d/%m/%Y', errors='coerce')
-            return df[['data', 'valor']].dropna()
-        except Exception:
-            pass
+    """Últimas n observações de uma série BCB SGS (mais recentes por último).
+    Tenta o intervalo de datas até hoje; se falhar, cai no endpoint 'ultimos/n'."""
+    for url in (_bcb_range_url(codigo, n), BCB_BASE.format(codigo=codigo, n=n)):
+        data = _get_json(url)
+        if data and isinstance(data, list):
+            try:
+                df = _parse_bcb(data)
+                if not df.empty:
+                    return df.tail(n).reset_index(drop=True)
+            except Exception:
+                pass
     return pd.DataFrame(columns=['data', 'valor'])
+
+
+def _bcb_serie(codigo: int, n: int = 4) -> float | None:
+    """Último valor disponível de uma série BCB SGS."""
+    df = _bcb_serie_historico(codigo, n=max(n, 2))
+    return float(df['valor'].iloc[-1]) if not df.empty else None
 
 
 def _ibge_pib_variacao(n: int = 4) -> dict:
@@ -338,13 +351,13 @@ def calcular_score_macro_setor(indicadores: dict, setor: str,
     score = comp_inad * 0.50 + comp_selic * 0.30 + comp_ipca * 0.20
 
     if score >= p75:
-        nivel, cor = "Favorável",    "#5FB38A"
+        nivel, cor = "Favorável",    "#1E8A57"
     elif score >= p25:
-        nivel, cor = "Neutro",       "#D4A94E"
+        nivel, cor = "Neutro",       "#B7791F"
     elif score >= p25 * 0.7:
-        nivel, cor = "Atenção",      "#D08A4E"
+        nivel, cor = "Atenção",      "#C2571A"
     else:
-        nivel, cor = "Desfavorável", "#D16760"
+        nivel, cor = "Desfavorável", "#BF3B33"
 
     return {
         'score':           round(score, 1),
@@ -529,7 +542,7 @@ def calcular_indicador_risco_setorial(df_aux: pd.DataFrame,
         # Fallback com dados de referência
         vals_hist = FALLBACK_HISTORICO.get(setor, FALLBACK_HISTORICO['default'])
         df_hist = pd.DataFrame({
-            'data':  pd.date_range(end=pd.Timestamp.today(), periods=20, freq='ME'),
+            'data':  pd.date_range(end=pd.Timestamp('2026-03-31'), periods=20, freq='ME'),
             'valor': vals_hist
         })
         fonte = 'fallback'
@@ -553,19 +566,19 @@ def calcular_indicador_risco_setorial(df_aux: pd.DataFrame,
 
     # 5. Tag
     if z <= -0.5:
-        tag, cor, emoji = 'Recomendado', '#5FB38A', '✅'
+        tag, cor, emoji = 'Recomendado', '#1E8A57', '✅'
         interpretacao = (
             f"A inadimplência PJ geral está {abs(z):.2f} desvios abaixo da média "
             f"histórica dos últimos 19 meses — momento favorável para aquisição."
         )
     elif z < 0.5:
-        tag, cor, emoji = 'Regular', '#D4A94E', '🔶'
+        tag, cor, emoji = 'Regular', '#B7791F', '🔶'
         interpretacao = (
             f"A inadimplência PJ geral está dentro da faixa histórica normal "
             f"(z-score: {z:+.2f}) — momento neutro para aquisição."
         )
     else:
-        tag, cor, emoji = 'Atenção', '#D16760', '🚨'
+        tag, cor, emoji = 'Atenção', '#BF3B33', '🚨'
         interpretacao = (
             f"A inadimplência PJ geral está {z:.2f} desvios acima da média "
             f"histórica dos últimos 19 meses — momento desfavorável para aquisição."
@@ -592,7 +605,7 @@ def calcular_indicador_risco_setorial(df_aux: pd.DataFrame,
         'banda_inf':     round(media_24m - 0.5 * desvio_24m, 2),
         'df_historico':  df_hist,
         'fonte':         fonte,
-        'data_atual':    data_atual.strftime('%b/%Y') if hasattr(data_atual, 'strftime') else str(data_atual),
+        'data_atual':    mes_ano_pt(data_atual) if hasattr(data_atual, 'month') else str(data_atual),
     }
 
 def run_macro(perfil_cnae: pd.DataFrame) -> dict:

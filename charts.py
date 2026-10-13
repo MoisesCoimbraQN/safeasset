@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from pipeline import RATING_COLOR
+from ptbr import br_text
 from theme import (NAVY, BLUE, ACCENT, ACCENT2, WARN, MUTED, BORDER,
                     WHITE, CARD_BG, AMBER, RISK_A, RISK_B, RISK_C,
                     RISK_D, RISK_E, EXTRA1, EXTRA2)
@@ -24,13 +25,37 @@ BASE_LAYOUT = dict(
     paper_bgcolor='rgba(0,0,0,0)',
     plot_bgcolor='rgba(0,0,0,0)',
     font=dict(color=WHITE, family='Space Grotesk'),
+    separators=',.',     # pt-BR: vírgula decimal, ponto de milhar (eixos e hovers)
 )
+
+
+def _br_fig(fig):
+    """Converte para pt-BR os textos já formatados em Python (rótulos de barras,
+    anotações, nomes de série) — eixos e hovers já seguem layout.separators."""
+    for tr in fig.data:
+        t = getattr(tr, 'text', None)
+        if isinstance(t, str):
+            tr.text = br_text(t)
+        elif t is not None:
+            try:
+                if len(t) and isinstance(t[0], str):
+                    tr.text = [br_text(x) if isinstance(x, str) else x for x in t]
+            except TypeError:
+                pass
+        if isinstance(getattr(tr, 'name', None), str):
+            tr.name = br_text(tr.name)
+    for ann in (fig.layout.annotations or []):
+        if ann.text:
+            ann.text = br_text(ann.text)
+    return fig
 
 def _fig(fig, height=360, margin=None, **kwargs):
     """Aplica tema e dimensões padrão a qualquer figura."""
     m = margin or dict(l=70, r=30, t=30, b=50)
+    fig.update_xaxes(gridcolor=BORDER, linecolor=BORDER, zerolinecolor=BORDER)
+    fig.update_yaxes(gridcolor=BORDER, linecolor=BORDER, zerolinecolor=BORDER)
     fig.update_layout(**BASE_LAYOUT, height=height, margin=m, **kwargs)
-    return fig
+    return _br_fig(fig)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -62,14 +87,6 @@ def fig_scores(df_aux: pd.DataFrame) -> go.Figure:
                      nbinsx=40, marker_color=col)
         for c, lbl, col in zip(cols, labels, colors)
     ])
-    # Linha de mediana para cada score
-    for c, lbl, col in zip(cols, labels, colors):
-        med = df_aux[c].median()
-        if pd.notna(med):
-            fig.add_vline(x=med, line_dash='dash', line_color=col, line_width=1.5,
-                          annotation_text=f'{lbl} md: {med:.0f}',
-                          annotation_font_color=col, annotation_font_size=9,
-                          annotation_position='top')
     return _fig(fig, height=360, barmode='overlay',
                 xaxis_title='Score (0–1000)', yaxis_title='Frequência',
                 legend=dict(orientation='h', y=1.05, font=dict(size=12)))
@@ -86,13 +103,6 @@ def fig_liquidez(df_aux: pd.DataFrame) -> go.Figure:
                      nbinsx=35, marker_color=col)
         for c, lbl, col in zip(cols, labels, colors)
     ])
-    for c, lbl, col in zip(cols, labels, colors):
-        med = df_aux[c].median()
-        if pd.notna(med):
-            fig.add_vline(x=med, line_dash='dash', line_color=col, line_width=1.5,
-                          annotation_text=f'{lbl} md: {med:.2f}',
-                          annotation_font_color=col, annotation_font_size=9,
-                          annotation_position='top')
     return _fig(fig, height=360, barmode='overlay',
                 xaxis_title='Índice (0–1)', yaxis_title='Frequência',
                 legend=dict(orientation='h', y=1.05, font=dict(size=12)))
@@ -191,7 +201,7 @@ def fig_heatmap_correlacao(corr_mat: pd.DataFrame) -> go.Figure:
         colorscale=[[0, RISK_E], [0.5, BORDER], [1, ACCENT2]],
         zmid=0, zmin=-1, zmax=1,
         text=corr_mat.round(2).values,
-        texttemplate='%{text}',
+        texttemplate='%{text:.2f}',
         textfont=dict(size=9),
         showscale=True,
     ))
@@ -282,7 +292,7 @@ def fig_roc(ml_results: dict) -> go.Figure:
                 xaxis_title='Taxa de Falso Positivo (FPR)',
                 yaxis_title='Taxa de Verdadeiro Positivo (TPR)',
                 legend=dict(x=0.38, y=0.08, font=dict(size=13),
-                            bgcolor='rgba(0,0,0,0.4)'))
+                            bgcolor='rgba(255,255,255,0.9)'))
 
 
 def fig_confusion_matrix(ml_results: dict) -> go.Figure:
@@ -300,7 +310,7 @@ def fig_confusion_matrix(ml_results: dict) -> go.Figure:
             showscale=False,
             text=res['cm'],
             texttemplate='%{text}',
-            textfont=dict(size=16, color=WHITE),
+            textfont=dict(size=16),
             xgap=3, ygap=3,
         ), row=1, col=i)
     return _fig(fig, height=460, margin=dict(l=90, r=40, t=60, b=60))
@@ -397,29 +407,74 @@ def fig_cnpjs_por_cnae(perfil_cnae: pd.DataFrame, top_n: int = 7) -> go.Figure:
                 yaxis=dict(tickfont=dict(size=11)))
 
 
+def _quebra(txt, n=36, linhas=2):
+    """Quebra um texto longo em até `linhas` linhas (<br>), truncando com …"""
+    out, atual = [], ''
+    for p in str(txt).split():
+        if not atual or len(atual) + len(p) + 1 <= n:
+            atual = f'{atual} {p}'.strip()
+        else:
+            out.append(atual)
+            atual = p
+    out.append(atual)
+    if len(out) > linhas:
+        out = out[:linhas]
+        out[-1] = out[-1][:n - 1].rstrip() + '…'
+    return '<br>'.join(out)
+
+
 def fig_score_por_cnae(perfil_cnae: pd.DataFrame, top_n: int = 7) -> go.Figure:
     """
-    Scatter com os top N setores: eixo X = score médio, eixo Y = qtd CNPJs,
-    tamanho da bolha = % de suspeitos, cor = rating predominante.
+    Dot plot dos top N setores — uma linha por setor (nome completo legível):
+      • posição horizontal = score FIDC médio do setor
+      • tamanho da bolha   = nº de CNPJs do setor
+      • cor da bolha       = % de CNPJs suspeitos (azul-claro → âmbar → vermelho)
     """
     df = perfil_cnae.head(top_n).copy()
+    if df.empty:
+        return go.Figure()
+    df = df.sort_values('score_medio', ascending=True).reset_index(drop=True)
 
-    fig = px.scatter(
-        df,
-        x='score_medio',
-        y='qtd_cnpjs',
-        size=df['pct_suspeitos'].clip(lower=1),
-        color='rating_predominante',
-        color_discrete_map=RATING_COLOR,
-        text='denominacao_curta',
-        hover_data={'denominacao': True, 'qtd_cnpjs': True,
-                    'score_medio': True, 'pct_suspeitos': True},
-        labels={'score_medio': 'Score FIDC Médio', 'qtd_cnpjs': 'Qtd de CNPJs',
-                'rating_predominante': 'Rating predominante'},
-    )
-    fig.update_traces(textposition='top center', textfont=dict(size=9, color=WHITE))
-    return _fig(fig, height=420, margin=dict(l=70, r=30, t=30, b=70),
-                legend=dict(orientation='h', y=1.08, font=dict(size=10)))
+    nomes = [_quebra(n) for n in df['denominacao']]
+    qtd   = df['qtd_cnpjs'].astype(float)
+    susp  = df['pct_suspeitos'].astype(float)
+    sizeref = 2.0 * max(qtd.max(), 1.0) / (36.0 ** 2)      # maior bolha ≈ 36px
+
+    x_min, x_max = df['score_medio'].min(), df['score_medio'].max()
+    folga = max((x_max - x_min), 40) * 0.12
+    x_range = [x_min - folga, x_max + max((x_max - x_min), 40) * 0.55]  # espaço p/ rótulo
+
+    fig = go.Figure(go.Scatter(
+        x=df['score_medio'], y=list(range(len(df))),
+        mode='markers+text',
+        marker=dict(
+            size=qtd, sizemode='area', sizeref=sizeref, sizemin=9,
+            color=susp, cmin=0, cmax=max(susp.max(), 1.0),
+            colorscale=[[0, '#A9C4E4'], [0.5, RISK_C], [1, RISK_E]],
+            line=dict(color=CARD_BG, width=1.5),
+            colorbar=dict(title=dict(text='% suspeitos', font=dict(color=WHITE, size=11)),
+                          tickfont=dict(color=WHITE, size=10), thickness=12, len=0.8),
+        ),
+        text=[f'{int(q):,} CNPJs · score {s:.0f}'
+              for q, s in zip(qtd, df['score_medio'])],
+        textposition='middle right',
+        textfont=dict(size=11, color=WHITE),
+        customdata=list(zip(df['denominacao'], df['rating_predominante'], susp, qtd)),
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br>"
+            "Score FIDC médio: %{x:.0f}<br>"
+            "CNPJs: %{customdata[3]:,.0f}<br>"
+            "% suspeitos: %{customdata[2]:.1f}%<br>"
+            "Rating predominante: %{customdata[1]}<extra></extra>"
+        ),
+        showlegend=False,
+    ))
+    return _fig(fig, height=max(380, 78 * len(df)),
+                margin=dict(l=270, r=30, t=20, b=60),
+                xaxis=dict(title='Score FIDC médio do setor', range=x_range),
+                yaxis=dict(tickmode='array', tickvals=list(range(len(df))),
+                           ticktext=nomes, tickfont=dict(size=11),
+                           range=[-0.6, len(df) - 0.4], showgrid=True))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -653,7 +708,7 @@ def fig_componentes_score_macro(score_detalhe: dict, setor: str) -> go.Figure:
     fig = go.Figure(go.Scatterpolar(
         r=valores_c, theta=categorias_c,
         fill='toself',
-        fillcolor=f"rgba(0,196,239,0.15)",
+        fillcolor='rgba(31,95,168,0.15)',
         line=dict(color=ACCENT, width=2),
         marker=dict(size=6, color=ACCENT),
     ))
@@ -770,7 +825,7 @@ def fig_risco_setorial(ind_risco: dict) -> go.Figure:
         x=pd.concat([df['data'], df['data'][::-1]]),
         y=[sup]*len(df) + [inf]*len(df),
         fill='toself',
-        fillcolor='rgba(248,196,11,0.12)',
+        fillcolor='rgba(183,121,31,0.15)',
         line=dict(color='rgba(0,0,0,0)'),
         name='Faixa Regular (±0.5σ)',
         showlegend=True,
@@ -796,7 +851,7 @@ def fig_risco_setorial(ind_risco: dict) -> go.Figure:
         x=[ultimo['data']], y=[ultimo['valor']],
         mode='markers+text',
         marker=dict(size=14, color=cor, symbol='circle',
-                    line=dict(color=WHITE, width=2)),
+                    line=dict(color=CARD_BG, width=2)),
         text=[f"  {ultimo['valor']:.2f}% — {tag}"],
         textfont=dict(color=cor, size=11),
         textposition='middle right',
@@ -975,7 +1030,7 @@ def fig_top10_valor(df: pd.DataFrame) -> go.Figure:
         text=[f'Score {s:.0f} · {r.split(" — ")[0]}'
               for s, r in zip(top['score_fidc'], top['rating_carteira'])],
         textposition='inside',
-        textfont=dict(color=WHITE, size=9),
+        textfont=dict(color='#FFFFFF', size=9),
     ))
     return _fig(fig, height=320,
                 margin=dict(l=120, r=60, t=20, b=40),
@@ -1036,7 +1091,7 @@ def fig_historico_cedente(hist: pd.DataFrame) -> go.Figure:
         x=df['run_dt'], y=df['score_medio_carteira'],
         mode='lines+markers',
         line=dict(color=ACCENT2, width=2),
-        marker=dict(size=10, color=marker_colors, line=dict(color=WHITE, width=1)),
+        marker=dict(size=10, color=marker_colors, line=dict(color=CARD_BG, width=1)),
         customdata=df[['qtd_cnpjs_cedidos', 'pct_rating_ab', 'origem']].values,
         hovertemplate=(
             "<b>%{x|%d/%m/%Y %H:%M}</b><br>"
@@ -1132,7 +1187,7 @@ def fig_juros_duplicatas(df: 'pd.DataFrame') -> 'go.Figure':
         name='Juros Duplicatas (% a.a.) — BCB 20719',
         line=dict(color=EXTRA1, width=2),
         fill='tozeroy',
-        fillcolor='rgba(107,122,153,0.12)',
+        fillcolor='rgba(91,108,153,0.12)',
     ))
 
     # Linha de média histórica

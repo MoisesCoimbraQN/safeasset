@@ -1,40 +1,44 @@
 # =============================================================================
 # theme.py — SafeAsset
 # Fonte única da paleta de cores — importada por pipeline.py, layout.py e
-# charts.py, para nunca mais haver hex duplicado/dessincronizado entre arquivos.
+# charts.py.
 #
-# Direção: dashboard executivo de crédito — poucas famílias de cor (não um
-# arco-íris), mas cada uma com contraste suficiente pra ler números e texto
-# de dado rapidamente contra o fundo escuro. "Profissional" != "apagado" —
-# dashboards financeiros sérios (ex: terminais de trading) usam cores vivas
-# com disciplina, não cores fracas.
+# TEMA CLARO — fundo neutro e cards brancos, para que os DADOS (números,
+# barras, linhas) sejam o ponto de destaque, não o plano de fundo. Cores de
+# dado são mais escuras/saturadas que no tema escuro, para ter contraste
+# sobre branco. Poucas famílias de cor: um azul de marca, e uma rampa de risco
+# (verde → azul → âmbar → laranja → vermelho) reaproveitada em rating, fraude
+# e macro.
+#
+# Obs.: os NOMES das constantes foram mantidos do tema escuro por
+# compatibilidade (WHITE = cor do texto principal, NAVY = fundo da página).
 # =============================================================================
 
 # ─── Base neutra ──────────────────────────────────────────────────────────
-NAVY    = '#0B0F14'   # fundo da página — grafite quase neutro
-BLUE    = '#1A2029'   # fundo de blocos secundários (header, painéis)
-CARD_BG = '#141920'   # fundo dos cards
-BORDER  = '#2B333F'   # bordas — cinza-azulado neutro (levemente mais claro)
-WHITE   = '#EDEFF2'   # texto principal — branco quase puro
-MUTED   = '#9BA5B3'   # texto secundário — mais claro que antes, ainda discreto
+NAVY    = '#F2F4F7'   # fundo da página — cinza-azulado muito claro
+BLUE    = '#E8ECF2'   # fundo de blocos secundários (header, painéis, resumos)
+CARD_BG = '#FFFFFF'   # fundo dos cards — branco
+BORDER  = '#D3D9E2'   # bordas
+WHITE   = '#1A2332'   # TEXTO principal — grafite escuro (nome mantido p/ compat.)
+MUTED   = '#5B6677'   # texto secundário
 
 BG_PAGE = NAVY
 BG_MAIN = CARD_BG
 DARK    = WHITE
 
-# ─── Destaque único (substitui o antigo ciano+verde+roxo) ────────────────
-ACCENT  = '#5B9BD5'   # azul-aço claro — única cor de marca/ação, bem legível
-ACCENT2 = '#5FB38A'   # verde-esmeralda — "positivo/adimplente", mesma lógica
+# ─── Destaque único ────────────────────────────────────────────────────────
+ACCENT  = '#1F5FA8'   # azul de marca — ação e destaque
+ACCENT2 = '#1E8A57'   # verde — "positivo/adimplente"
 
 # ─── Rampa de risco (5 níveis, reaproveitada em rating, fraude e macro) ──
-RISK_A = '#5FB38A'    # favorável / excelente / adimplente
-RISK_B = '#5B9BD5'    # bom / neutro-positivo
-RISK_C = '#D4A94E'    # atenção / risco moderado
-RISK_D = '#D08A4E'    # elevado / desfavorável
-RISK_E = '#D16760'    # alto risco / fraude / inadimplente
+RISK_A = '#1E8A57'    # favorável / excelente / adimplente
+RISK_B = '#1F5FA8'    # bom / neutro-positivo
+RISK_C = '#B7791F'    # atenção / risco moderado
+RISK_D = '#C2571A'    # elevado / desfavorável
+RISK_E = '#BF3B33'    # alto risco / fraude / inadimplente
 
-WARN   = RISK_D        # alias — mantém compatibilidade com o nome usado no código
-AMBER  = RISK_C         # alias — idem
+WARN   = RISK_D        # alias — compatibilidade
+AMBER  = RISK_C         # alias — compatibilidade
 
 RATING_COLOR = {
     'A — Excelente':      RISK_A,
@@ -45,23 +49,21 @@ RATING_COLOR = {
 }
 
 # ─── Tons categóricos extras (séries com mais de 5 categorias) ───────────
-EXTRA1 = '#7D8FB3'   # azul-ardósia claro — substitui o antigo roxo (#a78bfa)
-EXTRA2 = '#A6937F'   # marrom-areia claro — substitui o antigo rosa (#f472b6)
+EXTRA1 = '#5B6C99'   # azul-ardósia
+EXTRA2 = '#8A7355'   # marrom-areia
 
-# Cores de status do Score Macro (Favorável/Neutro/Atenção/Desfavorável) —
-# reaproveita a mesma rampa de risco em vez de uma paleta própria
+# Cores de status do Score Macro — reaproveita a rampa de risco
 MACRO_FAVORAVEL    = RISK_A
 MACRO_NEUTRO        = RISK_B
 MACRO_ATENCAO        = RISK_C
 MACRO_DESFAVORAVEL = RISK_E
 
-# ─── Tons claros de apoio (texto sobre fundo colorido, estado selecionado) ─
-ACCENT_LIGHT  = '#9CC1E0'   # tint claro do ACCENT — texto/borda sobre fundo ACCENT
-ACCENT2_LIGHT = '#9CD3B6'   # tint claro do ACCENT2 — idem, família verde
+# ─── Tons de apoio ────────────────────────────────────────────────────────
+ACCENT_LIGHT  = '#7FA6D4'   # tint do ACCENT — bordas/realces suaves
+ACCENT2_LIGHT = '#7FC4A0'   # tint do ACCENT2
 
-# ─── Fundos escuros tingidos (caixas de alerta/destaque, bem mais escuros
-# que CARD_BG, na mesma família de cor do conteúdo) ────────────────────────
-BG_INFO    = '#141B22'   # tingido de azul — blocos informativos (família Histórico)
-BG_SUCCESS = '#131C17'   # tingido de verde — blocos de sucesso (família Aquisição)
-BG_DANGER  = '#1C1514'   # tingido de vermelho — blocos de alerta/fraude
-DARKER     = '#0E1319'   # neutro, mais escuro que CARD_BG — listras de tabela, inputs
+# ─── Fundos tingidos (caixas de alerta/destaque, bem claros) ──────────────
+BG_INFO    = '#EAF1FA'   # tingido de azul
+BG_SUCCESS = '#E7F4EC'   # tingido de verde
+BG_DANGER  = '#FBEAE8'   # tingido de vermelho
+DARKER     = '#F6F8FA'   # neutro — listras de tabela, inputs
