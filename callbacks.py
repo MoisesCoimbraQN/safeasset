@@ -4,7 +4,7 @@
 # Conecta o frontend (layout.py) com os dados (pipeline.py) e gráficos (charts.py)
 # =============================================================================
 
-import base64, io, threading, functools
+import base64, io, threading
 import numpy as np
 import pandas as pd
 
@@ -13,11 +13,11 @@ import dash_bootstrap_components as dbc
 
 import pipeline as pl
 import charts as ch
-import storage as st
-from ptbr import localizar, mes_ano_pt
-from dash.development.base_component import Component
+import storage as st   
 from layout import (card, kpi, section_title, build_rank_table,
-                    ACCENT, ACCENT2, WARN, MUTED, BORDER, WHITE, NAVY, BLUE, CARD_BG)
+                    ACCENT, ACCENT2, WARN, MUTED, BORDER, WHITE, NAVY, BLUE, CARD_BG )
+from theme import BG_INFO, RISK_E
+
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -29,16 +29,6 @@ DARK   = WHITE    # texto claro sobre fundo escuro
 AMBER  = '#B7791F'  # âmbar — usado em alertas e destaques
 BG_MAIN = CARD_BG # fundo dos cards
 from pipeline import RATING_COLOR
-
-def _localizado(fn):
-    """Converte para pt-BR (vírgula decimal, ponto de milhar) o componente que o
-    callback devolve. Só mexe em componentes — nunca em strings/JSON de Store."""
-    @functools.wraps(fn)
-    def _wrap(*args, **kwargs):
-        out = fn(*args, **kwargs)
-        return localizar(out) if isinstance(out, Component) else out
-    return _wrap
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CACHE DE PIPELINE (em memória do processo)
@@ -506,7 +496,6 @@ def register_callbacks(app):
         State('store-df-full', 'data'),
         prevent_initial_call=True,
     )
-    @_localizado
     def update_rank_table(cnpj_q, sel_ufs, sel_cnaes, sel_ratings, score_range, df_full_json):
         if not df_full_json:
             return html.Div('Pipeline ainda não executado.', style={'color': MUTED})
@@ -676,7 +665,6 @@ def register_callbacks(app):
         State('store-raw-bol',  'data'),
         prevent_initial_call=True,
     )
-    @_localizado
     def update_macro_content(tab_ativa, macro_store_json, aux_json, bol_json):
         if tab_ativa != 'tab-outras':
             from dash.exceptions import PreventUpdate
@@ -782,7 +770,7 @@ def register_callbacks(app):
 
             def _make_fb(vals):
                 return _pd.DataFrame({
-                    'data':  _pd.date_range(end=_pd.Timestamp('2026-03-31'),
+                    'data':  _pd.date_range(end=_pd.Timestamp.today(),
                                             periods=20, freq='ME'),
                     'valor': vals,
                 }).sort_values('data').reset_index(drop=True)
@@ -800,19 +788,6 @@ def register_callbacks(app):
             _hist_juros      = _safe_hist(20715, _FB_JUROS)
             _hist_concessoes = _safe_hist(20632, _FB_CONC)
             _hist_duplicatas = _safe_hist(20719, _FB_DUPL)
-
-
-            def _obs(df, fonte_fb=False):
-                """Legenda com a data da última observação que a API devolveu."""
-                try:
-                    txt = mes_ano_pt(df['data'].iloc[-1])
-                except Exception:
-                    txt = '—'
-                rotulo = ('Dados de referência (sem conexão com o BCB) — até ' if fonte_fb
-                          else 'Última observação disponível na API do BCB: ')
-                return html.Div(rotulo + txt,
-                                style={'fontSize': '10px', 'color': MUTED,
-                                       'fontStyle': 'italic', 'marginBottom': '6px'})
 
             print('[SafeAsset] Macro content montado com sucesso')
 
@@ -917,7 +892,6 @@ def register_callbacks(app):
                     html.Div('BCB 20715 (juros % a.a.) · BCB 21083 (inadimplência %) · '
                              'Correlação: juros sobem → inadimplência tende a subir nos meses seguintes',
                              style={'fontSize': '10px', 'color': MUTED, 'marginBottom': '10px'}),
-                    _obs(_hist_inad, fonte != 'api'),
                     G(ch.fig_juros_vs_inadimplencia(_hist_juros, _hist_inad)),
                 ])] if _hist_juros is not None and _hist_inad is not None else [
                     html.Div('Dados de juros/inadimplência não disponíveis.',
@@ -932,7 +906,6 @@ def register_callbacks(app):
                     html.Div('BCB 20632 · Valor das novas operações contratadas no SFN (R$ milhões) · '
                              'Queda nas concessões sinaliza aperto de crédito e maior risco para sacados',
                              style={'fontSize': '10px', 'color': MUTED, 'marginBottom': '10px'}),
-                    _obs(_hist_concessoes, fonte != 'api'),
                     G(ch.fig_concessoes_pj(_hist_concessoes)),
                 ])] if _hist_concessoes is not None else [
                     html.Div('Dados de concessões não disponíveis.',
@@ -947,7 +920,6 @@ def register_callbacks(app):
                     html.Div('BCB 20719 · Taxa média % a.a. — operação de crédito livre mais próxima '
                              'do mercado de FIDC/recebíveis · Alta indica custo maior de captação para sacados',
                              style={'fontSize': '10px', 'color': MUTED, 'marginBottom': '10px'}),
-                    _obs(_hist_duplicatas, fonte != 'api'),
                     G(ch.fig_juros_duplicatas(_hist_duplicatas)),
                 ])] if _hist_duplicatas is not None else [
                     html.Div('Dados de juros duplicatas não disponíveis.',
@@ -975,7 +947,6 @@ def register_callbacks(app):
         State('store-raw-bol', 'data'),
         prevent_initial_call=True,
     )
-    @_localizado
     def update_cedentes_content(tab_ativa, df_full_json, bol_json):
         if tab_ativa != 'tab-cedentes':
             from dash.exceptions import PreventUpdate
@@ -1041,7 +1012,6 @@ def register_callbacks(app):
         State('store-raw-bol', 'data'),
         prevent_initial_call=True,
     )
-    @_localizado
     def update_cedente_detalhe(id_benef, df_full_json, bol_json):
         if not id_benef or not df_full_json or not bol_json:
             from dash.exceptions import PreventUpdate
@@ -1826,52 +1796,98 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                     G(ch.fig_cnpjs_por_cnae(perfil_cnae, top_n=7)),
                 ]),
                 card([
-                    html.Div('Score médio por setor  ·  tamanho da bolha = nº de CNPJs  ·  cor = % de CNPJs suspeitos',
+                    html.Div('Score médio vs volume de CNPJs por setor  (tamanho da bolha = % suspeitos)',
                              style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
                     G(ch.fig_score_por_cnae(perfil_cnae, top_n=7)),
                 ]),
 
               ])]),
 
-            # ── ANÁLISE DE FRAUDE ─────────────────────────────────────────
+          # ── ANÁLISE DE FRAUDE ─────────────────────────────────────────
             dcc.Tab(label='[H] Fraude', value='tab-fraude', style=TAB_HIST_STYLE, selected_style={**TAB_HIST_SEL, 'background': WARN, 'color': NAVY},
               children=[html.Div(style={'padding': '24px'}, children=[
-                section_title('2B. Detecção de Boletos Duplicados',
-                    f'Threshold: ≥ {fraude_stats["pct_dup_thresh"]*100:.0f}% duplicados  OU  ≥ {fraude_stats["n_emit_thresh"]} emitentes distintos'),
+                section_title('2B. Detecção de Boletos Duplicados e Concentração de Risco',
+                    f'Thresholds: ≥ {fraude_stats["pct_dup_thresh"]*100:.0f}% duplicados  OU  ≥ {fraude_stats["n_emit_thresh"]} emitentes distintos'),
 
-                # KPIs de fraude
+                # ── LINHA 1: KPI PRINCIPAL COM A REGRA DE ATIVAÇÃO ───────────────────────
                 dbc.Row([
-                    dbc.Col(kpi('Total Duplicatas',    f'{fraude_stats["total_duplicatas"]:,}',
-                                f'{fraude_stats["pct_duplicatas"]:.1f}% da base', WARN), width=3),
-                    dbc.Col(kpi('Dup. por ID',         f'{fraude_stats["total_dup_id"]:,}',
-                                'mesmo id_boleto repetido', WARN), width=3),
-                    dbc.Col(kpi('Dup. por Conteúdo',   f'{fraude_stats["total_dup_conteudo"]:,}',
-                                'valor+venc+pagador+benef', WARN), width=3),
-                    dbc.Col(kpi('CNPJs Suspeitos',      f'{fraude_stats["cnpjs_suspeitos"]:,}',
-                                f'de {fraude_stats["total_cnpjs_com_boleto"]:,} c/ boletos', WARN), width=3),
+                    dbc.Col(
+                        card([
+                            html.Div('CNPJs SUSPEITOS DE FRAUDE / RISCO', 
+                                     style={'fontSize': '12px', 'fontWeight': '700', 'color': WARN, 'letterSpacing': '1px'}),
+                            html.Div(f'{fraude_stats["cnpjs_suspeitos"]:,}', 
+                                     style={'fontSize': '38px', 'fontWeight': '800', 'color': WARN, 'margin': '4px 0'}),
+                            html.Div(f'de {fraude_stats["total_cnpjs_com_boleto"]:,} CNPJs analisados na base de dados', 
+                                     style={'fontSize': '12px', 'color': MUTED, 'marginBottom': '10px'}),
+                            
+                            html.Div([
+                                html.Span(' Regra de Ativação: ', style={'fontWeight': '700', 'color': WARN}),
+                                html.Span(f'Alerta disparado quando % Duplicados ≥ {fraude_stats["pct_dup_thresh"]*100:.0f}% OU Nº Emitentes ≥ {fraude_stats["n_emit_thresh"]}.',
+                                          style={'color': WHITE, 'fontWeight': '500'})
+                            ], style={
+                                'fontSize': '11px', 
+                                'background': '#EAF1FA', 
+                                'padding': '10px 14px', 
+                                'borderRadius': '8px', 
+                                'border': f'1px solid {BORDER}', 
+                                'marginTop': '8px'
+                            })
+                        ]), 
+                        width=12
+                    ),
+                ], style={'marginBottom': '16px'}),
+
+                # ── LINHA 2: 4 KPIS DETALHADOS ──────────────────────────────────────────
+                # ── LINHA 2: KPIS DOS 4 TIPOS DE CNPJS EM RISCO (TOTAL = 1.189) ─────────
+                dbc.Row([
+                    dbc.Col(kpi('Sem Alerta (Normal)', 
+                                f'{len(fraude_cnpj[fraude_cnpj["flag_risco_fraude"] == 0]):,}',
+                                'CNPJs regulares', ACCENT2), width=3),
+                    dbc.Col(kpi('Por Duplicatas', 
+                                f'{len(fraude_cnpj[fraude_cnpj["motivo_alerta"] == "Duplicatas excessivas"]):,}',
+                                '≥ 5% boletos dup.', WARN), width=3),
+                    dbc.Col(kpi('Por Muitos Beneficiários', 
+                                f'{len(fraude_cnpj[fraude_cnpj["motivo_alerta"] == "Muitos emitentes"]):,}',
+                                f'≥ {fraude_stats["n_emit_thresh"]} emitentes dist.', WARN), width=3),
+                    dbc.Col(kpi('Por Ambos os Motivos', 
+                                f'{len(fraude_cnpj[fraude_cnpj["motivo_alerta"] == "Duplicatas + Muitos emitentes"]):,}',
+                                'Risco crítico acumulado', RISK_E), width=3),
                 ], className='g-3', style={'marginBottom': '20px'}),
 
+                # ── LINHA 3: 4 TIPOS DE FRAUDE (ESQUERDA) + CASCATA DE VALOR EM RISCO (DIREITA) ──
+# ── GRÁFICO 1: DISTRIBUIÇÃO DE CNPJS POR CATEGORIA DE RISCO (LARGURA TOTAL) ──
                 dbc.Row([
                     dbc.Col([
-                        card([html.Div('Tipos de duplicata detectados', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
-                              G(ch.fig_duplicatas_tipo(fraude_stats))]),
-                    ], width=5),
-                    dbc.Col([
-                        card([html.Div('Concentração de emitentes por pagador', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
-                              G(ch.fig_emitentes_por_pagador(fraude_cnpj))]),
-                    ], width=7),
+                        card([
+                            html.Div('Distribuição de CNPJs por Categoria de Risco / Fraude', 
+                                     style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
+                            G(ch.fig_distribuicao_motivos_fraude(fraude_cnpj))
+                        ]),
+                    ], width=12),
                 ], className='g-3'),
 
-                card([html.Div('Top CNPJs por % de boletos duplicados  (laranja = flag de risco ativado)', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
-                      G(ch.fig_top_cnpjs_suspeitos(fraude_cnpj))]),
+                # ── GRÁFICO 2: CASCATA DE VALOR EM RISCO (LARGURA TOTAL - LOGO ABAIXO) ──
+                dbc.Row([
+                    dbc.Col([
+                        card([
+                            html.Div('Valor Total em Risco (R$) por Tipo de Fraude (Gráfico em Cascata)', 
+                                     style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
+                            G(ch.fig_valor_cascata_fraude(fraude_cnpj, df_bol))
+                        ]),
+                    ], width=12),
+                ], className='g-3'),
 
-                card([html.Div('Score FIDC vs % duplicados — CNPJs suspeitos em destaque', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
-                      G(ch.fig_scatter_fraude(df_full))]),
+                # ── LINHA 4: CONCENTRAÇÃO DE EMITENTES EM UMA LINHA ISOLADA ABAIXO ──
+                dbc.Row([
+                    dbc.Col([
+                        card([
+                            html.Div('Concentração de Emitentes por Pagador', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
+                            G(ch.fig_emitentes_por_pagador(fraude_cnpj))
+                        ]),
+                    ], width=12),
+                ], className='g-3'),
 
-                card([html.Div('Grupos de boletos duplicados com maior incidência', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
-                      G(ch.fig_resumo_duplicatas(resumo_dup))]),
-
-                # Tabela de CNPJs suspeitos
+                # ── TABELA FINAL DE CNPJs SUSPEITOS E BOTAO DE DOWNLOAD ──────────────────
                 card([
                     html.Div('CNPJs com flag de risco de fraude', style={'fontSize': '14px', 'fontWeight': '600', 'marginBottom': '12px', 'color': WARN}),
                     *([] if fraude_cnpj[fraude_cnpj['flag_risco_fraude'] == 1].empty else [
@@ -1905,6 +1921,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                     html.Div('Nenhum CNPJ suspeito encontrado com os thresholds atuais.',
                              style={'color': ACCENT2, 'fontSize': '13px', 'padding': '12px 0'})
                     if fraude_cnpj[fraude_cnpj['flag_risco_fraude'] == 1].empty else html.Div(),
+                    
                     # Download CNPJs com fraude
                     *([
                         html.Hr(style={'borderColor': BORDER, 'margin': '12px 0'}),
@@ -1918,87 +1935,6 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                                    'fontFamily': "'Space Grotesk',sans-serif",
                                    'fontSize': '12px'}),
                     ] if not fraude_cnpj[fraude_cnpj['flag_risco_fraude'] == 1].empty else []),
-                ]),
-              ])]),
-
-
-
-            # ── SCORE FINAL ───────────────────────────────────────────────
-            dcc.Tab(label='[H] Score Final', value='tab-score', style=TAB_HIST_STYLE, selected_style=TAB_HIST_SEL,
-              children=[html.Div(style={'padding': '24px'}, children=[
-                section_title('11. Score Final de Qualidade',
-                    'Fórmula composta: Liquidez Sacado (40%) + Materialidade (25%) + Quantidade (15%) + Atraso (12%) + Inadimplência (8%)'),
-                card([html.Div('Distribuição do Score FIDC', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_score_histograma(df_full))]),
-                card([html.Div('CNPJs por Rating de Carteira', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_rating_barras(df_full))]),
-                card([html.Div('Score FIDC Médio por UF', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_score_por_uf(df_full))]),
-                card([html.Div('Liquidez Sacado (1m) vs Score FIDC', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_scatter(df_full, 'sacado_indice_liquidez_1m', 'Liquidez Sacado (1m)'))]),
-                card([html.Div('Score Materialidade v2 vs Score FIDC', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_scatter(df_full, 'score_materialidade_v2', 'Score Materialidade v2'))]),
-                card([html.Div('Atraso Médio (dias) vs Score FIDC', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_scatter(df_full, 'media_atraso_dias', 'Média de Atraso (dias)'))]),
-
-                # ── Produto 2: ML como segunda opinião ────────────────────
-                *([
-                    html.Hr(style={'borderColor': BORDER, 'margin': '24px 0 16px'}),
-                    section_title('Produto 2 — Segunda Opinião do Modelo ML',
-                        f'Score FIDC = regra de negócio Núclea  ·  Prob. ML = padrões aprendidos nos boletos ({best_name.split()[0]})'),
-                    dbc.Row([
-                        dbc.Col(kpi('Divergências',
-                            f'{int(df_full["alerta_divergencia"].sum()):,}',
-                            f'{df_full["alerta_divergencia"].mean()*100:.1f}% da carteira', WARN), width=3),
-                        dbc.Col(kpi('Prob. ML Média',
-                            f'{df_full["prob_ml_bom"].mean():.1f}%',
-                            'carteira geral', ACCENT), width=3),
-                        dbc.Col(kpi('Score Alto + ML Pessimista',
-                            f'{int(((df_full["score_fidc"]>=800)&(df_full["prob_ml_bom"]<30)).sum()):,}',
-                            'score ≥ 800, ML < 30%', WARN), width=3),
-                        dbc.Col(kpi('Score Baixo + ML Otimista',
-                            f'{int(((df_full["score_fidc"]<300)&(df_full["prob_ml_bom"]>=70)).sum()):,}',
-                            'score < 300, ML ≥ 70%', ACCENT2), width=3),
-                card([
-                    html.Div('Score FIDC vs Probabilidade ML — quadrantes de divergência',
-                             style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '4px'}),
-                    html.Div('CNPJs em laranja merecem atenção especial — os dois sistemas discordam.',
-                             style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '8px'}),
-                    G(ch.fig_divergencia_ml(df_full)),
-                ]),
-                card([
-                    html.Div('Distribuição da Prob. ML por Rating',
-                             style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
-                    G(ch.fig_prob_ml_hist(df_full)),
-                ]),
-                  ] if 'prob_ml_bom' in df_full.columns else []),
-
-                    dbc.Row([
-                        dbc.Col([dcc.Input(id='rank-cnpj', placeholder='Buscar CNPJ...', debounce=True,
-                                           style={'width': '100%', 'background': '#F6F8FA', 'border': f'1px solid {BORDER}',
-                                                  'borderRadius': '6px', 'padding': '9px 12px', 'color': WHITE,
-                                                  'fontFamily': "'JetBrains Mono',monospace", 'fontSize': '12px'})], width=3),
-                        dbc.Col([dcc.Dropdown(id='rank-uf',
-                                              options=[{'label': u, 'value': u} for u in sorted(df_full['uf'].dropna().unique())],
-                                              placeholder='UF', multi=True, className='dark-dropdown')], width=2),
-                        dbc.Col([dcc.Dropdown(id='rank-cnae',
-                                              options=[{'label': str(c), 'value': str(c)} for c in sorted(df_full['cd_cnae_prin'].dropna().astype(str).unique())],
-                                              placeholder='CNAE', multi=True, className='dark-dropdown')], width=3),
-                        dbc.Col([dcc.Dropdown(id='rank-rating',
-                                              options=[{'label': r, 'value': r} for r in list(RATING_COLOR.keys())],
-                                              placeholder='Rating', multi=True, className='dark-dropdown')], width=2),
-                        dbc.Col([dcc.RangeSlider(id='rank-score', min=0, max=1000, step=50, value=[0, 1000],
-                                                  marks={0: '0', 500: '500', 1000: '1000'},
-                                                  tooltip={'always_visible': False})], width=2),
-                    ], className='g-2', style={'marginBottom': '16px'}),
-
-                    html.Div(id='rank-table-container',
-                             children=[build_rank_table(df_full)]),
-
-                    html.Br(),
-                    html.A('⬇️ Download CSV completo', id='download-link',
-                           download='resultado_fidc.csv',
-                           href='data:text/csv;charset=utf-8,' +
-                                df_full[['id_cnpj', 'uf', 'cd_cnae_prin', 'score_fidc', 'rating_carteira', 'target']]
-                                .sort_values('score_fidc', ascending=False).to_csv(index=False),
-                           target='_blank',
-                           style={'color': ACCENT, 'fontSize': '13px', 'textDecoration': 'none',
-                                  'border': f'1px solid {ACCENT}', 'borderRadius': '6px',
-                                  'padding': '9px 20px', 'display': 'inline-block', 'marginTop': '8px'}),
                 ]),
               ])]),
 
@@ -2495,4 +2431,5 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
 
               ])
             
-    return localizar(html.Div([kpi_row, tabs]))
+    return html.Div([kpi_row, tabs])
+

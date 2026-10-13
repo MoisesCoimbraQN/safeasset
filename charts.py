@@ -481,18 +481,35 @@ def fig_score_por_cnae(perfil_cnae: pd.DataFrame, top_n: int = 7) -> go.Figure:
 # ABA FRAUDE — Detecção de Boletos Duplicados e Risco de Fraude
 # ─────────────────────────────────────────────────────────────────────────────
 
-def fig_duplicatas_tipo(stats: dict) -> go.Figure:
-    """Barras comparando total de duplicatas por tipo (ID repetido vs Conteúdo idêntico)."""
-    fig = go.Figure([
-        go.Bar(name='ID repetido',       x=['Duplicatas'], y=[stats['total_dup_id']],
-               marker_color=WARN,   opacity=.85),
-        go.Bar(name='Conteúdo idêntico', x=['Duplicatas'], y=[stats['total_dup_conteudo']],
-               marker_color=ACCENT, opacity=.85),
-    ])
-    return _fig(fig, height=320, barmode='group',
-                margin=dict(l=70, r=30, t=20, b=50),
-                yaxis_title='Qtd de boletos',
-                legend=dict(orientation='h', y=1.05, font=dict(size=11)))
+def fig_distribuicao_motivos_fraude(fraude_cnpj: pd.DataFrame) -> go.Figure:
+    """
+    Gráfico de barras mostrando a quantidade de CNPJs em cada uma das 4 categorias de risco.
+    """
+    if fraude_cnpj.empty:
+        return go.Figure()
+
+    sem_risco = len(fraude_cnpj[fraude_cnpj['flag_risco_fraude'] == 0])
+    dup = len(fraude_cnpj[fraude_cnpj['motivo_alerta'] == 'Duplicatas excessivas'])
+    emit = len(fraude_cnpj[fraude_cnpj['motivo_alerta'] == 'Muitos emitentes'])
+    ambos = len(fraude_cnpj[fraude_cnpj['motivo_alerta'] == 'Duplicatas + Muitos emitentes'])
+
+    categories = ['Sem Alerta', 'Duplicatas Excessivas', 'Muitos Emitentes', 'Duplicatas + Emitentes']
+    values = [sem_risco, dup, emit, ambos]
+    colors = [ACCENT2, WARN, WARN, RISK_E]
+
+    fig = go.Figure(go.Bar(
+        x=categories,
+        y=values,
+        marker_color=colors,
+        text=[f"{v:,}" for v in values],
+        textposition='outside',
+        textfont=dict(size=11, color=WHITE)
+    ))
+
+    return _fig(fig, height=340,
+                margin=dict(l=60, r=40, t=30, b=50),
+                yaxis_title="Qtd de CNPJs",
+                xaxis=dict(tickfont=dict(size=11)))
 
 
 def fig_top_cnpjs_suspeitos(fraude_cnpj: pd.DataFrame, top_n: int = 15) -> go.Figure:
@@ -1207,3 +1224,72 @@ def fig_juros_duplicatas(df: 'pd.DataFrame') -> 'go.Figure':
         hovermode='x unified',
     )
     return _fig(fig, height=320, margin=dict(l=60, r=40, t=40, b=40))
+
+def fig_distribuicao_motivos_fraude(fraude_cnpj: pd.DataFrame) -> go.Figure:
+    """
+    Gráfico de barras mostrando a quantidade de CNPJs em cada uma das 4 categorias.
+    Soma exata: 1.142 + 0 + 47 + 0 = 1.189 CNPJs totais.
+    """
+    if fraude_cnpj.empty:
+        return go.Figure()
+
+    sem_risco = len(fraude_cnpj[fraude_cnpj['flag_risco_fraude'] == 0])
+    dup = len(fraude_cnpj[fraude_cnpj['motivo_alerta'] == 'Duplicatas excessivas'])
+    emit = len(fraude_cnpj[fraude_cnpj['motivo_alerta'] == 'Muitos emitentes'])
+    ambos = len(fraude_cnpj[fraude_cnpj['motivo_alerta'] == 'Duplicatas + Muitos emitentes'])
+
+    categories = ['Sem Alerta', 'Duplicatas Excessivas', 'Muitos Emitentes', 'Duplicatas + Emitentes']
+    values = [sem_risco, dup, emit, ambos]
+    colors = [ACCENT2, WARN, WARN, RISK_E]
+
+    fig = go.Figure(go.Bar(
+        x=categories,
+        y=values,
+        marker_color=colors,
+        text=[f"{v:,} CNPJs" for v in values],
+        textposition='outside',
+        textfont=dict(size=11, color=WHITE)
+    ))
+
+    return _fig(fig, height=340,
+                margin=dict(l=60, r=40, t=30, b=50),
+                yaxis_title="Qtd de CNPJs",
+                xaxis=dict(tickfont=dict(size=11)))
+
+
+def fig_valor_cascata_fraude(fraude_cnpj: pd.DataFrame, df_bol: pd.DataFrame) -> go.Figure:
+    """
+    Gráfico de Cascata (Waterfall) construindo o Valor Total da Carteira (R$)
+    a partir das 4 categorias de risco.
+    """
+    if fraude_cnpj.empty or df_bol.empty:
+        return go.Figure()
+
+    vlr_pag = df_bol.groupby('id_pagador')['vlr_nominal'].sum().reset_index()
+    df_merged = fraude_cnpj.merge(vlr_pag, on='id_pagador', how='left')
+
+    m_norm  = df_merged[df_merged['flag_risco_fraude'] == 0]['vlr_nominal'].sum()
+    m_dup   = df_merged[df_merged['motivo_alerta'] == 'Duplicatas excessivas']['vlr_nominal'].sum()
+    m_emit  = df_merged[df_merged['motivo_alerta'] == 'Muitos emitentes']['vlr_nominal'].sum()
+    m_ambos = df_merged[df_merged['motivo_alerta'] == 'Duplicatas + Muitos emitentes']['vlr_nominal'].sum()
+
+    total_carteira = m_norm + m_dup + m_emit + m_ambos
+
+    fig = go.Figure(go.Waterfall(
+        name="Valor da Carteira",
+        orientation="v",
+        measure=["relative", "relative", "relative", "relative", "total"],
+        x=["Sem Alerta (Normal)", "Duplicatas Excessivas", "Muitos Emitentes", "Duplicatas + Emitentes", "TOTAL CARTEIRA"],
+        textposition="outside",
+        text=[f"R$ {m_norm:,.0f}", f"R$ {m_dup:,.0f}", f"R$ {m_emit:,.0f}", f"R$ {m_ambos:,.0f}", f"R$ {total_carteira:,.0f}"],
+        y=[m_norm, m_dup, m_emit, m_ambos, total_carteira],
+        connector={"line": {"color": BORDER}},
+        decreasing={"marker": {"color": ACCENT2}},
+        increasing={"marker": {"color": WARN}},
+        totals={"marker": {"color": ACCENT}}
+    ))
+
+    return _fig(fig, height=360,
+                margin=dict(l=70, r=40, t=30, b=60),
+                yaxis_title="Valor Total dos Boletos (R$)",
+                xaxis=dict(tickfont=dict(size=10)))
