@@ -273,26 +273,57 @@ def fig_feature_importance(feat_imp: pd.Series, best_name: str) -> go.Figure:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fig_roc(ml_results: dict) -> go.Figure:
-    """Curvas ROC sobrepostas para todos os modelos."""
-    cores = [ACCENT, ACCENT2, WARN]
-    traces = [
-        go.Scatter(
+    """Curvas ROC sobrepostas para todos os modelos com tema escuro ajustado."""
+    cores = [ACCENT2, ACCENT, WARN]
+    traces = []
+    
+    for (nome, res), cor in zip(ml_results.items(), cores):
+        traces.append(go.Scatter(
             x=res['fpr'], y=res['tpr'],
-            name=f'{nome}  (AUC = {res["auc"]:.3f})',
-            mode='lines', line=dict(width=2.5, color=cor)
-        )
-        for (nome, res), cor in zip(ml_results.items(), cores)
-    ]
+            name=f'{nome} (AUC = {res["auc"]:.3f})',
+            mode='lines', line=dict(width=3, color=cor)
+        ))
+        
+    # Linha diagonal de referência (Classificador Aleatório)
     traces.append(go.Scatter(
-        x=[0, 1], y=[0, 1], mode='lines',
-        line=dict(dash='dash', color=MUTED, width=1), showlegend=False,
+        x=[0, 1], y=[0, 1], name='Baseline (Aleatório)', mode='lines',
+        line=dict(dash='dash', color=MUTED, width=1.5), showlegend=True,
     ))
+    
     fig = go.Figure(traces)
-    return _fig(fig, height=500, margin=dict(l=70, r=40, t=30, b=70),
-                xaxis_title='Taxa de Falso Positivo (FPR)',
-                yaxis_title='Taxa de Verdadeiro Positivo (TPR)',
-                legend=dict(x=0.38, y=0.08, font=dict(size=13),
-                            bgcolor='rgba(255,255,255,0.9)'))
+    return _fig(fig, height=450, margin=dict(l=70, r=40, t=30, b=70),
+                xaxis_title='Taxa de Falso Positivo (1 - Especificidade)',
+                yaxis_title='Taxa de Verdadeiro Positivo (Sensibilidade)',
+                legend=dict(x=0.45, y=0.15, font=dict(size=12, color=WHITE),
+                            bgcolor='rgba(0,0,0,0.5)', bordercolor=BORDER, borderwidth=1))
+
+
+def fig_confusion_matrix(ml_results: dict) -> go.Figure:
+    """Matrizes de confusão ordenadas e alinhadas para cada modelo."""
+    n = len(ml_results)
+    fig = make_subplots(rows=1, cols=n,
+                        subplot_titles=list(ml_results.keys()),
+                        horizontal_spacing=0.10)
+    
+    for i, (nome, res) in enumerate(ml_results.items(), 1):
+        cm = res['cm'] # Array 2x2: [[TN, FP], [FN, TP]]
+        
+        fig.add_trace(go.Heatmap(
+            z=cm,
+            x=['Pred. Inadimplente (0)', 'Pred. Adimplente (1)'],
+            y=['Real Inadimplente (0)',  'Real Adimplente (1)'],
+            colorscale=[[0, NAVY], [0.5, BLUE], [1, ACCENT2]],
+            showscale=False,
+            text=cm,
+            texttemplate='<b>%{text}</b>',
+            textfont=dict(size=18, color=WHITE),
+            xgap=4, ygap=4,
+        ), row=1, col=i)
+        
+        # Inverter eixo Y para manter Real Inadimplente (0) no topo e Real Adimplente (1) na base
+        fig.update_yaxes(autorange='reversed', row=1, col=i)
+        
+    return _fig(fig, height=420, margin=dict(l=100, r=40, t=50, b=60))
 
 
 def fig_confusion_matrix(ml_results: dict) -> go.Figure:
@@ -1056,40 +1087,91 @@ def fig_top10_valor(df: pd.DataFrame) -> go.Figure:
 
 def fig_cedentes_ranking(perfil_cedentes: pd.DataFrame, top_n: int = 15) -> go.Figure:
     """
-    Barras horizontais dos cedentes por qtd de CNPJs cedidos na carteira atual.
-    Cor = score médio da carteira cedida (qualidade, não tendência — 
-    tendência depende de histórico entre execuções, ainda não disponível).
+    Barras horizontais dos cedentes por qtd de CNPJs cedidos na carteira atual,
+    com IDs encurtados no eixo Y e sobreposição com Benchmark Histórico AWS.
     """
     df = perfil_cedentes.head(top_n).copy()
     if df.empty:
         return go.Figure()
+
     df = df.sort_values('qtd_cnpjs_cedidos', ascending=True)
 
-    fig = go.Figure(go.Bar(
+    # Formatar rótulos curtos para o eixo Y (ex: "c1ce267dfa6a…")
+    df['id_curto'] = df['id_beneficiario'].astype(str).apply(
+        lambda x: (x[:12] + '…') if len(x) > 12 else x
+    )
+
+    if 'score_historico_aws' not in df.columns:
+        df['score_historico_aws'] = np.nan
+    if 'desvio_score_aws' not in df.columns:
+        df['desvio_score_aws'] = 0.0
+
+    fig = go.Figure()
+
+    # Trace 1: Barras do Score da Carteira Atual (Oculta da legenda para não encavalar com a Colorbar)
+    fig.add_trace(go.Bar(
         x=df['qtd_cnpjs_cedidos'],
-        y=df['id_beneficiario'].astype(str),
+        y=df['id_curto'],
         orientation='h',
+        name='Score Carteira Atual',
+        showlegend=False,
         marker=dict(
             color=df['score_medio_carteira'],
             colorscale=[[0, WARN], [0.5, ACCENT], [1, ACCENT2]],
             showscale=True,
-            colorbar=dict(title=dict(text='Score Médio', font=dict(color=WHITE, size=11)),
-                          tickfont=dict(color=WHITE, size=10)),
+            colorbar=dict(
+                title=dict(text='Score Atual', font=dict(color=WHITE, size=11)),
+                tickfont=dict(color=WHITE, size=10),
+                x=1.03,  # Desloca a barra de cores à direita para evitar colisões
+                len=0.85
+            ),
         ),
         text=[f"{v:,} CNPJs" for v in df['qtd_cnpjs_cedidos']],
         textposition='outside',
         textfont=dict(size=11, color=WHITE),
-        customdata=df[['vlr_total_cedido', 'pct_rating_ab', 'pct_flag_fraude']].values,
+        customdata=df[['id_beneficiario', 'vlr_total_cedido', 'pct_rating_ab', 'pct_flag_fraude', 'score_medio_carteira']].values,
         hovertemplate=(
-            "<b>%{y}</b><br>"
-            "CNPJs cedidos: %{x}<br>"
-            "Valor total: R$ %{customdata[0]:,.0f}<br>"
-            "% Rating A+B: %{customdata[1]:.1f}%<br>"
-            "% Suspeito fraude: %{customdata[2]:.1f}%<extra></extra>"
+            "<b>ID Completo:</b> %{customdata[0]}<br>"
+            "<b>CNPJs cedidos:</b> %{x}<br>"
+            "<b>Valor total:</b> R$ %{customdata[1]:,.0f}<br>"
+            "<b>Score Médio Atual:</b> %{customdata[4]:.0f}<br>"
+            "<b>% Rating A+B:</b> %{customdata[2]:.1f}%<br>"
+            "<b>% Suspeito fraude:</b> %{customdata[3]:.1f}%<extra></extra>"
         ),
     ))
-    return _fig(fig, height=max(340, top_n * 40),
-                margin=dict(l=140, r=100, t=20, b=50),
+
+    # Trace 2: Marcadores em Diamante para o Benchmark AWS
+    if df['score_historico_aws'].notna().any():
+        fig.add_trace(go.Scatter(
+            x=df['qtd_cnpjs_cedidos'],
+            y=df['id_curto'],
+            mode='markers',
+            name='Benchmark AWS (Histórico)',
+            marker=dict(
+                size=11,
+                color=AMBER,
+                symbol='diamond',
+                line=dict(color=WHITE, width=1.2)
+            ),
+            customdata=df[['id_beneficiario', 'score_historico_aws', 'desvio_score_aws']].values,
+            hovertemplate=(
+                "<b>Benchmark AWS</b><br>"
+                "ID Completo: %{customdata[0]}<br>"
+                "Score Histórico AWS: %{customdata[1]:.0f}<br>"
+                "Desvio para Carteira: %{customdata[2]:+.0f} pts<extra></extra>"
+            )
+        ))
+
+    return _fig(fig, height=max(380, top_n * 42),
+                margin=dict(l=110, r=120, t=30, b=60),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="left",
+                    x=0.01,
+                    font=dict(size=11, color=WHITE)
+                ),
                 xaxis_title='Qtd de CNPJs Cedidos',
                 yaxis=dict(tickfont=dict(size=11)))
 

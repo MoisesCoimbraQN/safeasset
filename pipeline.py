@@ -14,11 +14,12 @@ from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, GradientBoostingRegressor
 from sklearn.metrics import (
     roc_auc_score, average_precision_score,
     confusion_matrix, roc_curve
 )
+from xgboost import XGBClassifier, XGBRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 
@@ -123,7 +124,11 @@ def calcular_perfil_cnae(df_full: pd.DataFrame) -> pd.DataFrame:
 # ANÁLISE DE CEDENTES — Perfil histórico do beneficiário
 # ─────────────────────────────────────────────────────────────────────────────
 
-def calcular_perfil_beneficiario(df_bol: pd.DataFrame, df_full: pd.DataFrame) -> pd.DataFrame:
+def calcular_perfil_beneficiario(
+    df_bol: pd.DataFrame, 
+    df_full: pd.DataFrame, 
+    df_aws_cedentes: pd.DataFrame = None
+) -> pd.DataFrame:
     """
     Agrega o perfil de cessão de carteira por beneficiário (cedente).
 
@@ -136,9 +141,8 @@ def calcular_perfil_beneficiario(df_bol: pd.DataFrame, df_full: pd.DataFrame) ->
       pct_rating_de        : % dos sacados com rating D ou E
       pct_flag_fraude      : % dos sacados com flag de risco de fraude
       prob_ml_media        : probabilidade ML média (bom pagador) dos sacados
-
-    Requer df_full já processado por calcular_score_final() e calcular_prob_ml().
-    Sem histórico entre execuções ainda — reflete só a carteira atual (Fase 1).
+      score_historico_aws  : benchmark histórico do cedente na AWS
+      desvio_score_aws     : diferença entre a carteira atual e o histórico
     """
     cols_full = ['id_cnpj', 'score_fidc', 'rating_carteira']
     if 'prob_ml_bom' in df_full.columns:
@@ -185,6 +189,18 @@ def calcular_perfil_beneficiario(df_bol: pd.DataFrame, df_full: pd.DataFrame) ->
     perfil['score_medio_carteira'] = perfil['score_medio_carteira'].round(0)
     if 'prob_ml_media' in perfil.columns:
         perfil['prob_ml_media'] = perfil['prob_ml_media'].round(1)
+
+    # Verificação da AWS com tratamento de segurança
+    if df_aws_cedentes is not None and isinstance(df_aws_cedentes, pd.DataFrame) and 'id_beneficiario' in df_aws_cedentes.columns:
+        perfil = perfil.merge(
+            df_aws_cedentes[['id_beneficiario', 'score_historico_aws']],
+            on='id_beneficiario',
+            how='left'
+        )
+        perfil['desvio_score_aws'] = perfil['score_medio_carteira'] - perfil['score_historico_aws']
+    else:
+        perfil['score_historico_aws'] = np.nan
+        perfil['desvio_score_aws'] = 0.0
 
     return perfil.sort_values('qtd_cnpjs_cedidos', ascending=False).reset_index(drop=True)
 
@@ -359,6 +375,21 @@ def definir_target(df_full: pd.DataFrame,
               f"Adimplentes: {df['target'].sum():,} ({pct:.1f}%)  "
               f"Inadimplentes: {(df['target']==0).sum():,} ({100-pct:.1f}%)")
 
+        # O modelo precisa de exemplos das DUAS classes (e ao menos 5 de cada,
+        # por causa da validação cruzada de 5 folds). Uma base só de boletos
+        # pagos não treina um classificador de adimplência.
+        n_por_classe = df['target'].value_counts()
+        if len(n_por_classe) < 2 or n_por_classe.min() < 5:
+            raise ValueError(
+                "A base de boletos não tem exemplos suficientes das duas classes: "
+                f"{int(df['target'].sum()):,} CNPJs adimplentes (target = 1) e "
+                f"{int((df['target'] == 0).sum()):,} inadimplentes (target = 0). "
+                "É preciso ao menos 5 CNPJs inadimplentes reais — com boleto sem "
+                "baixa (vlr_baixa vazio ou zero) e que não seja baixa por solicitação "
+                "do cedente/instituição (tipos 5 e 8). Use uma base histórica que "
+                "inclua inadimplência."
+            )
+
     else:
         raise ValueError(
             "Base de boletos não disponível para calcular o target. "
@@ -390,83 +421,84 @@ def _make_pipeline(model) -> Pipeline:
     ])
 
 
-def treinar_modelos(df_full: pd.DataFrame, avail: list,
-                    test_size: float, n_estimators: int):
-    df_model = df_full[avail + ['target']].dropna(subset=['target'])
-    X = df_model[avail]
-    y = df_model['target']
+def treinar_modelos_duas_etapas(df_full: pd.DataFrame, avail: list, test_size: float = 0.2, n_estimators: int = 100):
+    """
+    Hurdle Model em Duas Etapas:
+      Etapa 1: Classificação (Probabilidade de Adimplência / Score FIDC)
+      Etapa 2: Regressão (Dias em atraso esperados no subset liquidado target == 1)
+    """
+    # 1. ETAPA DE CLASSIFICAÇÃO (Target Binário)
+    df_clf = df_full[avail + ['target']].dropna(subset=['target'])
+    X_clf = df_clf[avail]
+    y_clf = df_clf['target']
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=42, stratify=y
+    X_tr_c, X_te_c, y_tr_c, y_te_c = train_test_split(
+        X_clf, y_clf, test_size=test_size, random_state=42, stratify=y_clf
     )
 
-    n_neg = int((y_train == 0).sum())
-    n_pos = int((y_train == 1).sum())
+    n_neg = int((y_tr_c == 0).sum())
+    n_pos = int((y_tr_c == 1).sum())
     scale_pos = max(1.0, n_neg / n_pos) if n_pos > 0 else 1.0
-    print(f"[SafeAsset] Treino — target=1: {n_pos} ({n_pos/(n_pos+n_neg)*100:.1f}%)  "
-          f"target=0: {n_neg}  scale_pos_weight: {scale_pos:.1f}")
 
-    boost = (
-        XGBClassifier(n_estimators=200, max_depth=4, learning_rate=0.05,
-                      use_label_encoder=False, eval_metric='logloss',
-                      scale_pos_weight=scale_pos,
-                      random_state=42, n_jobs=-1)
-        if XGBOOST_AVAILABLE else
-        GradientBoostingClassifier(n_estimators=200, max_depth=4,
-                                   learning_rate=0.05, random_state=42)
-    )
-    boost_name = 'XGBoost' if XGBOOST_AVAILABLE else 'GradientBoosting'
+    if XGBOOST_AVAILABLE:
+        mdl_clf = XGBClassifier(
+            n_estimators=200, max_depth=4, learning_rate=0.05,
+            eval_metric='logloss', scale_pos_weight=scale_pos, random_state=42, n_jobs=-1
+        )
+        nome_modelo = 'XGBoost (Hurdle)'
+    else:
+        mdl_clf = GradientBoostingClassifier(n_estimators=200, max_depth=4, learning_rate=0.05, random_state=42)
+        nome_modelo = 'GradientBoosting (Hurdle)'
 
-    modelos = {
-        'Logistic Regression': _make_pipeline(
-            LogisticRegression(max_iter=1000, class_weight='balanced', random_state=42)
-        ),
-        'Random Forest': _make_pipeline(
-            RandomForestClassifier(n_estimators=n_estimators, class_weight='balanced',
-                                   random_state=42, n_jobs=-1)
-        ),
-        boost_name: _make_pipeline(boost),
+    pipe_clf = _make_pipeline(mdl_clf)
+    
+    # --- CROSS-VALIDATION (5 Folds) para preencher cv_scores no dashboard ---
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    cv_scores = cross_val_score(pipe_clf, X_tr_c, y_tr_c, cv=cv, scoring='roc_auc', n_jobs=-1)
+
+    # Treinamento final no conjunto completo de treino
+    pipe_clf.fit(X_tr_c, y_tr_c)
+
+    # 2. ETAPA DE REGRESSÃO (Subset Liquidado: target == 1)
+    df_reg = df_full[(df_full['target'] == 1) & (df_full['media_atraso_dias'].notna())].copy()
+    
+    pipe_reg = None
+    if len(df_reg) > 0:
+        X_reg = df_reg[avail]
+        y_reg = df_reg['media_atraso_dias']
+
+        if XGBOOST_AVAILABLE:
+            mdl_reg = XGBRegressor(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42, n_jobs=-1)
+        else:
+            mdl_reg = GradientBoostingRegressor(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42)
+
+        pipe_reg = _make_pipeline(mdl_reg)
+        pipe_reg.fit(X_reg, y_reg)
+
+    # 3. METRICAS DE TESTE E DICIONÁRIO ML_RESULTS
+    y_pred = pipe_clf.predict(X_te_c)
+    y_proba = pipe_clf.predict_proba(X_te_c)[:, 1]
+    auc_val = roc_auc_score(y_te_c, y_proba)
+    fpr, tpr, _ = roc_curve(y_te_c, y_proba)
+
+    ml_results = {
+        nome_modelo: {
+            'pipe': pipe_clf,
+            'pipe_reg': pipe_reg,
+            'auc': auc_val,
+            'ap': average_precision_score(y_te_c, y_proba),
+            'y_pred': y_pred,
+            'y_proba': y_proba,
+            'fpr': fpr.tolist(),
+            'tpr': tpr.tolist(),
+            'cm': confusion_matrix(y_te_c, y_pred).tolist(),
+            'cv_scores': cv_scores.tolist(),  # <-- CHAVE CORRIGIDA
+            'cv_mean': cv_scores.mean(),
+            'cv_std': cv_scores.std(),
+        }
     }
 
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    resultados = {}
-
-    for nome, pipe in modelos.items():
-        cv_scores = cross_val_score(pipe, X_train, y_train, cv=cv,
-                                    scoring='roc_auc', n_jobs=-1)
-        pipe.fit(X_train, y_train)
-        y_pred  = pipe.predict(X_test)
-        y_proba = pipe.predict_proba(X_test)[:, 1]
-        fpr, tpr, _ = roc_curve(y_test, y_proba)
-
-        resultados[nome] = dict(
-            pipe      = pipe,
-            cv_mean   = cv_scores.mean(),
-            cv_std    = cv_scores.std(),
-            auc       = roc_auc_score(y_test, y_proba),
-            ap        = average_precision_score(y_test, y_proba),
-            y_pred    = y_pred,
-            y_proba   = y_proba,
-            fpr       = fpr.tolist(),
-            tpr       = tpr.tolist(),
-            cm        = confusion_matrix(y_test, y_pred).tolist(),
-            cv_scores = cv_scores.tolist(),
-        )
-
-    best = max(resultados, key=lambda n: resultados[n]['auc'])
-    try:
-        calibrated = CalibratedClassifierCV(
-            resultados[best]['pipe'], cv='prefit', method='sigmoid'
-        )
-        calibrated.fit(X_test, y_test)
-        resultados[best]['pipe_calibrated'] = calibrated
-        print(f"[SafeAsset] Calibração OK — {best}")
-    except Exception as e:
-        print(f"[SafeAsset] Calibração falhou ({e}) — usando pipe original")
-        resultados[best]['pipe_calibrated'] = resultados[best]['pipe']
-
-    return resultados, X_test, y_test
-
+    return ml_results, X_te_c, y_te_c
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PASSO 10 — FEATURE IMPORTANCE
@@ -677,7 +709,7 @@ def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
 
     # Passos 7-8 — modelagem ML
     avail = [f for f in FEATURES if f in df_full.columns]
-    ml_results, X_test, y_test = treinar_modelos(df_full, avail, test_size, n_estimators)
+    ml_results, X_test, y_test = treinar_modelos_duas_etapas(df_full, avail, test_size, n_estimators)
 
     result['ml']          = ml_results
     result['X_test']      = X_test
@@ -702,3 +734,30 @@ def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
 
 
     return result
+
+def calcular_atraso_esperado_composto(df_full: pd.DataFrame, pipe_clf, pipe_reg, avail: list, penalidade_default: float = 90.0) -> pd.DataFrame:
+    df = df_full.copy()
+    X = df[avail].copy()
+    
+    # Fillna com a mediana para a predição
+    imputer = SimpleImputer(strategy='median')
+    X_imp = imputer.fit_transform(X)
+    
+    # Probabilidade de Adimplência
+    prob_adim = pipe_clf.predict_proba(X_imp)[:, 1]
+    
+    # Previsão de Dias de Atraso (se for adimplente)
+    if pipe_reg is not None:
+        dias_pred = pipe_reg.predict(X_imp)
+        dias_pred = np.clip(dias_pred, 0, None)  # Não permite atrasos negativos
+    else:
+        dias_pred = np.zeros(len(df))
+        
+    # Atraso Esperado Ponderado (Hurdle Composite)
+    atraso_composto = (prob_adim * dias_pred) + ((1 - prob_adim) * penalidade_default)
+    
+    df['prob_adimplencia'] = (prob_adim * 100).round(1)
+    df['dias_atraso_estimado'] = np.round(dias_pred, 1)
+    df['atraso_esperado_composto'] = np.round(atraso_composto, 1)
+    
+    return df
