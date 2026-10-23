@@ -30,7 +30,8 @@ O SafeAsset recebe três bases (base auxiliar de sacados, histórico de boletos 
 - Um **score de Machine Learning** como segunda opinião, com detecção de divergências entre os dois modelos;
 - Um **indicador de detecção de fraude** (boletos duplicados, concentração excessiva de emitentes);
 - Um **contexto macroeconômico setorial**, obtido em tempo real das APIs do Banco Central (SGS) e do IBGE (SIDRA);
-- Uma **recomendação final automática** (Recomendado / Recomendado com Atenção / Não Recomendado) para a carteira nova.
+- Um **perfil histórico dos sacados** da base PCR, usado para treinar o modelo e diagnosticar o comportamento observado — sem representar uma recomendação de aquisição;
+- Quando uma carteira nova é enviada, uma **avaliação preliminar de aquisição** (Recomendado / Recomendado com Atenção / Não Recomendado), separada da análise histórica e limitada aos dados disponíveis.
 
 ---
 
@@ -43,7 +44,7 @@ O SafeAsset recebe três bases (base auxiliar de sacados, histórico de boletos 
 | 📊 **EDA** | Nulos, distribuições de scores/liquidez, atraso por UF, volume mensal de boletos, tipos de baixa |
 | 🎯 **Target real** | Adimplência calculada a partir do comportamento real de pagamento dos boletos (sem *data leakage*), excluindo cancelamentos comerciais |
 | 🤖 **Modelagem ML** | Treina e compara Regressão Logística, Random Forest e XGBoost (ou Gradient Boosting como fallback), com cross-validation (k=5), curvas ROC e matrizes de confusão |
-| 🥇 **Score Final** | Fórmula ponderada de negócio: Liquidez do Sacado (40%) + Materialidade (25%) + Quantidade (15%) + Atraso (12%) + Inadimplência (8%) |
+| 🥇 **Score Final** | Perfil histórico por sacado, calculado pela fórmula ponderada: Liquidez (40%) + Materialidade (25%) + Quantidade (15%) + Atraso (12%) + Inadimplência (8%); não é decisão de aquisição |
 | 🏭 **Análise Setorial (CNAE)** | Perfil de risco por setor de atividade, com denominações oficiais CNAE 2.0 |
 | 🌐 **Contexto Macro** | SELIC, IPCA, câmbio, PIB e inadimplência PJ por setor (BCB SGS + IBGE SIDRA), com fallback offline |
 | 📈 **Indicador de Risco Setorial** | Z-score da inadimplência do setor predominante da carteira frente à média histórica de 24 meses |
@@ -180,7 +181,7 @@ Variáveis de ambiente úteis:
 
 | Aba | Conteúdo |
 |---|---|
-| 📋 **Resumo** | Veredicto automático de aquisição, cobertura da carteira, indicadores consolidados |
+| 📋 **Resumo** | Perfil histórico da base PCR e, quando enviada, avaliação preliminar da carteira nova |
 | 📊 **EDA** | Análise exploratória geral e por setor CNAE |
 | 🚨 **Fraude** | KPIs e gráficos de boletos duplicados, download de CNPJs suspeitos |
 | 🎯 **Target & Correlação** | Distribuição do target e correlação das features |

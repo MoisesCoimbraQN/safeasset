@@ -1287,8 +1287,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
     boas_pct    = df_full['target'].mean() * 100
     n_suspeitos = fraude_stats['cnpjs_suspeitos']
 
-    # ── Regra de Recomendação Final ────────────────────────────────────────
-# ── Regra de Recomendação Final Detalhada (Com Item de Regra Ferido) ──────
+    # ── Classificação do perfil histórico da Base PCR ─────────────────────
     _score_med  = df_full['score_fidc'].mean()
     _pct_ab     = df_full['rating_carteira'].isin(['A — Excelente','B — Bom']).mean() * 100
     _pct_de     = df_full['rating_carteira'].isin(['D — Risco Elevado','E — Alto Risco']).mean() * 100
@@ -1312,45 +1311,36 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
     if _macro_tag == 'Atenção':
         _regras_feridas.append("Regra 4 (Alerta Macroeconômico): Setor sob atenção devido à alta de inadimplência PJ nacional.")
 
-    # Determinação da Classificação Final
+    # Classificação do perfil observado, sem decisão de aquisição.
     if len(_regras_feridas) == 0:
-        _rec_tag = 'Recomendado'
-        _rec_label = ' RECOMENDADO — Todos os critérios de governança atendidos'
+        _rec_tag = 'Perfil histórico favorável'
+        _rec_label = ' PERFIL HISTÓRICO FAVORÁVEL — Critérios de referência atendidos'
         _rec_bg = ACCENT2
     elif _score_med >= 500 and _pct_ab >= 30.0 and _pct_fraude < 3.0:
-        _rec_tag = 'Recomendado com Atenção'
-        _rec_label = ' RECOMENDADO COM ATENÇÃO — Critérios parciais atendidos'
+        _rec_tag = 'Perfil histórico com pontos de atenção'
+        _rec_label = ' PERFIL HISTÓRICO COM PONTOS DE ATENÇÃO — Critérios parcialmente atendidos'
         _rec_bg = AMBER
     else:
-        _rec_tag = 'Não Recomendado'
-        _rec_label = ' NÃO RECOMENDADO — Regras de risco feridas'
+        _rec_tag = 'Perfil histórico desfavorável'
+        _rec_label = ' PERFIL HISTÓRICO DESFAVORÁVEL — Critérios de referência não atendidos'
         _rec_bg = WARN
-
-    # Notas adicionais e divergência ML
-    _notas = []
-    if _pct_diverg > 5:
-        _notas.append(
-            f'⚠️ Divergência ML: {_n_diverg} CNPJs ({_pct_diverg:.1f}%) apresentam divergência '
-            'entre o Score FIDC e o modelo ML. Recomenda-se análise individual antes da aquisição.'
-        )
 
     # Notas de aviso
     _notas = []
-    if _macro_tag == 'Atenção' and _rec_tag == 'Recomendado':
+    if _macro_tag == 'Atenção' and _rec_tag == 'Perfil histórico favorável':
         _notas.append(
-            '⚠️ Macro: Recomendação mantida pelos indicadores dos sacados, mas a inadimplência '
+            '⚠️ Macro: O perfil histórico dos sacados é favorável, mas a inadimplência '
             'PJ geral está acima da média histórica dos últimos 19 meses. '
-            'Recomenda-se análise do contexto macroeconômico antes da aquisição.'
+            'Considere esse contexto ao interpretar os indicadores.'
         )
     if _pct_diverg > 5:
         _notas.append(
             f'⚠️ Divergência ML: {_n_diverg} CNPJs ({_pct_diverg:.1f}%) apresentam divergência '
             'entre o Score FIDC e o modelo ML. Recomenda-se análise individual desses CNPJs '
-            'antes da aquisição.'
+            'para aprofundar a leitura do histórico.'
         )
 
     # ── Recomendação — Carteira Nova (CNPJs com histórico) ────────────────
-# ── Recomendação Detalhada — Carteira Nova (CNPJs com histórico) ──────
     _cart_regras_feridas = []
     if not df_conhecidos.empty:
         _cart_score_med  = df_conhecidos['score_fidc'].mean()
@@ -1485,9 +1475,9 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
               children=[html.Div(style={'padding': '24px'}, children=[
 
                 html.Div([
-                    html.Div('Resumo Indicativo de Carteira',
+                    html.Div('Resumo da Análise de Crédito',
                              style={'fontSize': '22px', 'fontWeight': '700', 'color': WHITE}),
-                    html.Div('Visão consolidada — Base Histórica (PCR) e Carteira Nova em Aquisição',
+                    html.Div('Perfil histórico dos sacados e, quando enviada, análise preliminar de uma carteira nova',
                              style={'fontSize': '13px', 'color': MUTED, 'marginTop': '4px'}),
                 ], style={'marginBottom': '24px'}),
 
@@ -1507,7 +1497,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                         html.Span('Análise histórica · Base PCR',
                                   style={'fontSize': '14px', 'fontWeight': '700',
                                          'color': ACCENT}),
-                        html.Span('Dados históricos de sacados — treino do modelo e diagnóstico da carteira passada',
+                        html.Span('Histórico de pagamentos para análise de perfil; não representa recomendação de aquisição',
                                   style={'fontSize': '11px', 'color': MUTED}),
                     ]),
                 ]),
@@ -1524,17 +1514,17 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
 
                     # Exibição detalhada das Regras Feridas (Se houver)
                     *([html.Div([
-                        html.Div(' Justificativa Técnica / Regras Feridas:', 
+                        html.Div(' Critérios que geraram pontos de atenção:',
                                  style={'fontWeight': 'bold', 'color': WARN, 'fontSize': '12px', 'marginBottom': '6px'}),
                         html.Ul([
                             html.Li(regra, style={'color': WHITE, 'fontSize': '12px', 'marginBottom': '4px'})
                             for regra in _regras_feridas
                         ], style={'margin': '0', 'paddingLeft': '20px'})
                     ], style={
-                        'backgroundColor': BLUE, 'borderLeft': f'4px solid {WARN if _rec_tag != "Recomendado" else ACCENT2}',
+                        'backgroundColor': BLUE, 'borderLeft': f'4px solid {WARN if _rec_tag != "Perfil histórico favorável" else ACCENT2}',
                         'padding': '10px 16px', 'borderRadius': '6px', 'marginTop': '8px'
                     })] if _regras_feridas else [
-                        html.Div(' Todos os itens de regra (Score ≥ 700, % A+B ≥ 50%, Fraude < 1%) foram plenamente satisfeitos.',
+                        html.Div(' Os critérios de referência (Score ≥ 700, % A+B ≥ 50%, Fraude < 1%) foram atendidos para o perfil histórico.',
                                  style={'color': ACCENT2, 'fontSize': '12px', 'marginTop': '8px'})
                     ]),
                 ]),
@@ -1542,7 +1532,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
 
                 # Bloco Target
                 card([
-                    html.Div('0 — Recomendação segundo o Target',
+                    html.Div('0 — Histórico de adimplência dos sacados',
                              style={'fontSize': '15px', 'fontWeight': '700',
                                     'color': ACCENT, 'marginBottom': '16px',
                                     'borderLeft': f'4px solid {ACCENT}',
@@ -1550,17 +1540,17 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                     html.Div('Adimplência real dos boletos — target=1 quando o sacado não possui boletos inadimplentes reais (excluindo cancelamentos comerciais)',
                              style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '16px'}),
                     dbc.Row([
-                        dbc.Col(kpi('Carteiras Boas',
+                        dbc.Col(kpi('Sacados adimplentes',
                             f'{int(df_full["target"].sum()):,}',
-                            f'{df_full["target"].mean()*100:.1f}% da base — target = 1',
+                            f'{df_full["target"].mean()*100:.1f}% da base PCR — target = 1',
                             ACCENT2), width=4),
-                        dbc.Col(kpi('Carteiras Ruins',
+                        dbc.Col(kpi('Sacados inadimplentes',
                             f'{int((df_full["target"]==0).sum()):,}',
-                            f'{(df_full["target"]==0).mean()*100:.1f}% da base — target = 0',
+                            f'{(df_full["target"]==0).mean()*100:.1f}% da base PCR — target = 0',
                             WARN), width=4),
                         dbc.Col(kpi('Total Analisado',
                             f'{len(df_full):,}',
-                            'CNPJs na carteira', ACCENT), width=4),
+                            'CNPJs na base PCR', ACCENT), width=4),
                     ], className='g-3'),
                 ]),
 
@@ -1626,7 +1616,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                                     'borderLeft': f'4px solid {WARN}',
                                     'paddingLeft': '10px'}),
                     html.Div('CNPJs onde os dois sistemas apontam direções opostas — '
-                             'requerem análise adicional do analista antes da aquisição',
+                             'merecem revisão individual para aprofundar a leitura do histórico',
                              style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '16px'}),
                     dbc.Row([
                         dbc.Col(kpi('Sinais de Atenção',
@@ -1710,26 +1700,32 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                     ]),
                 ]),
 
-                # Recomendação textual histórica
+                # Síntese do perfil histórico
                 html.Div(style={
                     'background': '#EAF1FA', 'border': f'1px solid {BORDER}',
                     'borderLeft': f'4px solid {ACCENT2}',
                     'borderRadius': '10px', 'padding': '16px 20px', 'marginTop': '8px',
                 }, children=[
-                    html.Div('📌 Recomendação Automática — Base Histórica (PCR)',
+                    html.Div('📌 Síntese do Perfil Histórico — Base PCR',
                              style={'fontSize': '13px', 'fontWeight': '700',
                                     'color': ACCENT2, 'marginBottom': '8px'}),
                     html.Div([
-                        html.Span(f"A carteira contém {len(df_full):,} CNPJs com score médio de "
+                        html.Span(f"A base histórica contém {len(df_full):,} sacados com score médio de "
                                   f"{df_full['score_fidc'].mean():.0f}/1000. "),
-                        html.Span(f"{int(df_full['target'].sum()):,} CNPJs "
-                                  f"({df_full['target'].mean()*100:.1f}%) são classificados como boas carteiras pelo target. "),
+                        html.Span(f"{int(df_full['target'].sum()):,} sacados "
+                                  f"({df_full['target'].mean()*100:.1f}%) não apresentaram inadimplência real nos boletos observados. "),
                         html.Span(f"{int((df_full['rating_carteira'].isin(['A — Excelente','B — Bom'])).sum()):,} CNPJs "
                                   f"possuem rating A ou B pelo score de negócio. "),
                         *([html.Span(f"{int(df_full['alerta_divergencia'].sum()):,} CNPJs apresentam sinais divergentes entre "
-                            "score de negócio e score ML — recomenda-se análise individual antes da aquisição."
+                            "score de negócio e score ML — recomenda-se revisão individual do histórico."
                         )] if 'alerta_divergencia' in df_full.columns else []),
                     ], style={'fontSize': '13px', 'color': WHITE, 'lineHeight': '1.8'}),
+                    html.Div(
+                        'Esta síntese descreve o histórico dos sacados da Base PCR. '
+                        'Não avalia nem recomenda a aquisição de uma carteira.',
+                        style={'fontSize': '11px', 'color': MUTED, 'marginTop': '8px',
+                               'fontStyle': 'italic'},
+                    ),
                 ]),
 
                 # ════════════════════════════════════════════════════════
