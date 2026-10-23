@@ -1,7 +1,7 @@
 # =============================================================================
 # layout.py — SafeAsset
 # Responsável por: estrutura HTML/CSS do Dash (sidebar, header, tabs)
-# Tema: dark tech azul-noite
+# Tema: claro, neutro e com azul como cor de marca
 # =============================================================================
 
 from dash import dcc, html, dash_table

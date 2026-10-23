@@ -20,7 +20,7 @@ from theme import (NAVY, BLUE, ACCENT, ACCENT2, WARN, MUTED, BORDER,
 # TEMA GLOBAL — cores vêm de theme.py (fonte única)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Template base para todos os gráficos (fundo transparente, fonte clara)
+# Template base para os gráficos (fundo transparente, texto escuro)
 BASE_LAYOUT = dict(
     paper_bgcolor='rgba(0,0,0,0)',
     plot_bgcolor='rgba(0,0,0,0)',
@@ -1088,7 +1088,7 @@ def fig_top10_valor(df: pd.DataFrame) -> go.Figure:
 def fig_cedentes_ranking(perfil_cedentes: pd.DataFrame, top_n: int = 15) -> go.Figure:
     """
     Barras horizontais dos cedentes por qtd de CNPJs cedidos na carteira atual,
-    com IDs encurtados no eixo Y e sobreposição com Benchmark Histórico AWS.
+    com IDs encurtados no eixo Y e score médio indicado pela cor.
     """
     df = perfil_cedentes.head(top_n).copy()
     if df.empty:
