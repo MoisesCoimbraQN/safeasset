@@ -30,6 +30,21 @@ AMBER  = '#B7791F'  # âmbar — usado em alertas e destaques
 BG_MAIN = CARD_BG # fundo dos cards
 from pipeline import RATING_COLOR
 
+
+def _lista_regras(regras):
+    """Exibe todas as regras; as não atendidas ficam em destaque (negrito + cor de alerta)."""
+    itens = []
+    for ok, texto in regras:
+        if ok:
+            itens.append(html.Li(f'✓ {texto}', style={
+                'color': MUTED, 'fontSize': '12px', 'marginBottom': '4px'}))
+        else:
+            itens.append(html.Li(f'✗ {texto}', style={
+                'color': WARN, 'fontWeight': '800', 'fontSize': '12px', 'marginBottom': '4px',
+                'backgroundColor': 'rgba(192,57,43,0.10)', 'padding': '3px 8px',
+                'borderRadius': '4px'}))
+    return html.Ul(itens, style={'listStyle': 'none', 'margin': '4px 0 8px 0', 'paddingLeft': '0'})
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CACHE DE PIPELINE (em memória do processo)
 #
@@ -1311,6 +1326,15 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
     if _macro_tag == 'Atenção':
         _regras_feridas.append("Regra 4 (Alerta Macroeconômico): Setor sob atenção devido à alta de inadimplência PJ nacional.")
 
+    _regras_todas = [
+        (_crit_score,  f"Regra 1 (Score Mínimo): Score médio {_score_med:.0f}/1000 — mínimo de 700 pts."),
+        (_crit_rating, f"Regra 2 (Concentração A/B): {_pct_ab:.1f}% dos CNPJs com Rating A ou B — mínimo de 50.0%."),
+        (_crit_fraude, f"Regra 3 (Risco de Fraude): taxa de {_pct_fraude:.1f}% — limite tolerado de 1.0%."),
+        (_macro_tag != 'Atenção', "Regra 4 (Alerta Macroeconômico): inadimplência PJ nacional dentro da média histórica."
+                                  if _macro_tag != 'Atenção' else
+                                  "Regra 4 (Alerta Macroeconômico): setor sob atenção devido à alta de inadimplência PJ nacional."),
+    ]
+
     # Classificação do perfil observado, sem decisão de aquisição.
     if len(_regras_feridas) == 0:
         _rec_tag = 'Perfil histórico favorável'
@@ -1342,6 +1366,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
 
     # ── Recomendação — Carteira Nova (CNPJs com histórico) ────────────────
     _cart_regras_feridas = []
+    _cart_regras_todas = []
     if not df_conhecidos.empty:
         _cart_score_med  = df_conhecidos['score_fidc'].mean()
         _cart_pct_ab     = df_conhecidos['rating_carteira'].isin(['A — Excelente','B — Bom']).mean() * 100
@@ -1355,6 +1380,12 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
             _cart_regras_feridas.append(f"Regra 2 (Rating A/B): Apenas {_cart_pct_ab:.1f}% dos sacados conhecidos possuem Rating A ou B (mínimo: 50.0%).")
         if _cart_pct_fraude >= 1.0:
             _cart_regras_feridas.append(f"Regra 3 (Alerta de Fraude): Taxa de fraude na carteira nova ({_cart_pct_fraude:.1f}%) excede 1.0%.")
+
+        _cart_regras_todas = [
+            (_cart_score_med >= 700, f"Regra 1 (Score Mínimo): Score médio da carteira nova {_cart_score_med:.0f}/1000 — mínimo de 700 pts."),
+            (_cart_pct_ab >= 50.0, f"Regra 2 (Rating A/B): {_cart_pct_ab:.1f}% dos sacados conhecidos com Rating A ou B — mínimo de 50.0%."),
+            (_cart_pct_fraude < 1.0, f"Regra 3 (Alerta de Fraude): taxa de {_cart_pct_fraude:.1f}% na carteira nova — limite de 1.0%."),
+        ]
 
         if len(_cart_regras_feridas) == 0:
             _cart_rec_label = ' RECOMENDADO — Qualidade de crédito aprovada'
@@ -1375,6 +1406,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
 
     # ── Recomendação Detalhada — CNPJs Novos (sem histórico) ──────────────
     _novos_regras_feridas = []
+    _novos_regras_todas = []
     _cob = R.get('cobertura') or {}
     if _cob.get('sem_historico', 0) > 0:
         _novos_n       = _cob['sem_historico']
@@ -1386,6 +1418,11 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
             _novos_regras_feridas.append(f"Regra 4 (Exposição Sem Histórico): {_novos_vlr_pct:.1f}% do valor total cede a sacados inéditos (limite tolerado sem análise: 20.0%).")
         if _novos_fraude > 0:
             _novos_regras_feridas.append(f"Regra 5 (Fraude em Inéditos): Identificados {_novos_fraude} CNPJs inéditos com suspeita de fraude.")
+
+        _novos_regras_todas = [
+            (_novos_vlr_pct < 20.0, f"Regra 4 (Exposição Sem Histórico): {_novos_vlr_pct:.1f}% do valor total cede a sacados inéditos — limite de 20.0% sem análise."),
+            (_novos_fraude == 0, f"Regra 5 (Fraude em Inéditos): {_novos_fraude} CNPJs inéditos com suspeita de fraude — tolerância zero."),
+        ]
 
         if len(_novos_regras_feridas) == 0:
             _novos_rec_label = ' ANÁLISE MANUAL RECOMENDADA — Baixa exposição inédita'
@@ -1512,21 +1549,14 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                         }),
                     ], style={'marginBottom': '12px'}),
 
-                    # Exibição detalhada das Regras Feridas (Se houver)
-                    *([html.Div([
-                        html.Div(' Critérios que geraram pontos de atenção:',
-                                 style={'fontWeight': 'bold', 'color': WARN, 'fontSize': '12px', 'marginBottom': '6px'}),
-                        html.Ul([
-                            html.Li(regra, style={'color': WHITE, 'fontSize': '12px', 'marginBottom': '4px'})
-                            for regra in _regras_feridas
-                        ], style={'margin': '0', 'paddingLeft': '20px'})
+                    html.Div([
+                        html.Div(' Critérios de referência do perfil histórico (em destaque: não atendidos):',
+                                 style={'fontWeight': 'bold', 'color': WHITE, 'fontSize': '12px', 'marginBottom': '6px'}),
+                        _lista_regras(_regras_todas),
                     ], style={
-                        'backgroundColor': BLUE, 'borderLeft': f'4px solid {WARN if _rec_tag != "Perfil histórico favorável" else ACCENT2}',
+                        'backgroundColor': BLUE, 'borderLeft': f'4px solid {WARN if _regras_feridas else ACCENT2}',
                         'padding': '10px 16px', 'borderRadius': '6px', 'marginTop': '8px'
-                    })] if _regras_feridas else [
-                        html.Div(' Os critérios de referência (Score ≥ 700, % A+B ≥ 50%, Fraude < 1%) foram atendidos para o perfil histórico.',
-                                 style={'color': ACCENT2, 'fontSize': '12px', 'marginTop': '8px'})
-                    ]),
+                    }),
                 ]),
 
 
@@ -1899,13 +1929,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                                     'padding': '3px 12px', 'borderRadius': '12px', 'display': 'inline-block'
                                 }),
                             ], style={'marginBottom': '6px'}),
-                            *([html.Ul([
-                                html.Li(r, style={'color': WHITE, 'fontSize': '12px', 'marginBottom': '3px'})
-                                for r in _cart_regras_feridas
-                            ], style={'margin': '4px 0 8px 0', 'paddingLeft': '20px'})] if _cart_regras_feridas else [
-                                html.Div(' Todos os critérios de pontuação, rating A/B e fraude foram satisfeitos para os sacados conhecidos.',
-                                         style={'fontSize': '12px', 'color': ACCENT2, 'marginBottom': '8px'})
-                            ])
+                            _lista_regras(_cart_regras_todas),
                         ], style={'marginBottom': '12px'})] if _cart_rec_label else []),
 
                         # Bloco 2: Sacados Inéditos (Sem Histórico) + Regras Feridas
@@ -1918,13 +1942,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                                     'padding': '3px 12px', 'borderRadius': '12px', 'display': 'inline-block'
                                 }),
                             ], style={'marginBottom': '6px'}),
-                            *([html.Ul([
-                                html.Li(r, style={'color': WHITE, 'fontSize': '12px', 'marginBottom': '3px'})
-                                for r in _novos_regras_feridas
-                            ], style={'margin': '4px 0 8px 0', 'paddingLeft': '20px'})] if _novos_regras_feridas else [
-                                html.Div(' Exposição a sacados sem histórico dentro do limite seguro.',
-                                         style={'fontSize': '12px', 'color': ACCENT2, 'marginBottom': '8px'})
-                            ])
+                            _lista_regras(_novos_regras_todas),
                         ], style={'marginBottom': '12px'})] if _novos_rec_label else []),
 
                         # Alerta Macroeconômico / Setorial complementar

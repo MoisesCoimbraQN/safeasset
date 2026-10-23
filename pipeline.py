@@ -443,7 +443,7 @@ def treinar_modelos_duas_etapas(df_full: pd.DataFrame, avail: list, test_size: f
     if XGBOOST_AVAILABLE:
         mdl_clf = XGBClassifier(
             n_estimators=200, max_depth=4, learning_rate=0.05,
-            eval_metric='logloss', scale_pos_weight=scale_pos, random_state=42, n_jobs=-1
+            eval_metric='logloss', scale_pos_weight=scale_pos, random_state=42, n_jobs=1
         )
         nome_modelo = 'XGBoost (Hurdle)'
     else:
@@ -454,7 +454,7 @@ def treinar_modelos_duas_etapas(df_full: pd.DataFrame, avail: list, test_size: f
     
     # --- CROSS-VALIDATION (5 Folds) para preencher cv_scores no dashboard ---
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    cv_scores = cross_val_score(pipe_clf, X_tr_c, y_tr_c, cv=cv, scoring='roc_auc', n_jobs=-1)
+    cv_scores = cross_val_score(pipe_clf, X_tr_c, y_tr_c, cv=cv, scoring='roc_auc', n_jobs=1)
 
     # Treinamento final no conjunto completo de treino
     pipe_clf.fit(X_tr_c, y_tr_c)
@@ -468,7 +468,7 @@ def treinar_modelos_duas_etapas(df_full: pd.DataFrame, avail: list, test_size: f
         y_reg = df_reg['media_atraso_dias']
 
         if XGBOOST_AVAILABLE:
-            mdl_reg = XGBRegressor(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42, n_jobs=-1)
+            mdl_reg = XGBRegressor(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42, n_jobs=1)
         else:
             mdl_reg = GradientBoostingRegressor(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42)
 
