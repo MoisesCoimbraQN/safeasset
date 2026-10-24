@@ -11,20 +11,17 @@ import numpy as np
 import pandas as pd
 
 from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
-from sklearn.calibration import CalibratedClassifierCV
 from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, GradientBoostingRegressor
+from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor
 from sklearn.metrics import (
     roc_auc_score, average_precision_score,
-    confusion_matrix, roc_curve
+    confusion_matrix, roc_curve, mean_absolute_error
 )
-from xgboost import XGBClassifier, XGBRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 
 try:
-    from xgboost import XGBClassifier
+    from xgboost import XGBClassifier, XGBRegressor
     XGBOOST_AVAILABLE = True
 except ImportError:
     XGBOOST_AVAILABLE = False
@@ -99,18 +96,21 @@ def calcular_perfil_cnae(df_full: pd.DataFrame) -> pd.DataFrame:
     df['cd_cnae_fmt'] = df['cd_cnae_prin'].apply(_formatar_cnae)
     if 'flag_risco_fraude' not in df.columns:
         df['flag_risco_fraude'] = 0
+    df['flag_risco_fraude'] = df['flag_risco_fraude'].fillna(0).astype(int)
 
     perfil = df.groupby('cd_cnae_fmt').agg(
         qtd_cnpjs           = ('id_cnpj',          'count'),
+        qtd_cnpjs_suspeitos = ('flag_risco_fraude', 'sum'),
         score_medio         = ('score_fidc',         'mean'),
-        pct_suspeitos       = ('flag_risco_fraude',  'mean'),
         rating_predominante = ('rating_carteira',
                                lambda x: x.value_counts().index[0]
                                if len(x) > 0 else 'N/D'),
     ).reset_index()
 
     perfil['score_medio']   = perfil['score_medio'].round(0).astype(int)
-    perfil['pct_suspeitos'] = (perfil['pct_suspeitos'] * 100).round(1)
+    perfil['pct_suspeitos'] = (
+        perfil['qtd_cnpjs_suspeitos'] / perfil['qtd_cnpjs'] * 100
+    ).round(1)
 
     perfil = perfil.merge(CNAE_DENOMINACOES, on='cd_cnae_fmt', how='left')
     perfil['denominacao'] = perfil['denominacao'].fillna('Não identificado')
@@ -132,17 +132,21 @@ def calcular_perfil_beneficiario(
     """
     Agrega o perfil de cessão de carteira por beneficiário (cedente).
 
+    Score, rating, probabilidade ML e fraude são médias POR BOLETO: cada boleto
+    carrega os valores do seu sacado, então um sacado com mais boletos pesa mais.
+
     Para cada id_beneficiario, calcula:
       qtd_cnpjs_cedidos    : nº de sacados distintos na carteira cedida
       qtd_boletos_total    : nº total de boletos cedidos
       vlr_total_cedido     : valor nominal total cedido
-      score_medio_carteira : score FIDC médio dos sacados cedidos
-      pct_rating_ab        : % dos sacados com rating A ou B
-      pct_rating_de        : % dos sacados com rating D ou E
-      pct_flag_fraude      : % dos sacados com flag de risco de fraude
-      prob_ml_media        : probabilidade ML média (bom pagador) dos sacados
-      score_historico_aws  : benchmark histórico do cedente na AWS
-      desvio_score_aws     : diferença entre a carteira atual e o histórico
+      score_medio_carteira : score FIDC médio dos boletos cedidos
+      pct_rating_ab        : % dos boletos cujo sacado tem rating A ou B
+      pct_rating_de        : % dos boletos cujo sacado tem rating D ou E
+      pct_flag_fraude      : % dos boletos cujo sacado tem flag de risco de fraude
+      prob_ml_media        : probabilidade ML média (bom pagador) dos boletos
+      score_historico_aws  : benchmark histórico do cedente na AWS (opcional;
+                             NaN quando df_aws_cedentes não é informado)
+      desvio_score_aws     : carteira atual − histórico (NaN sem benchmark)
     """
     cols_full = ['id_cnpj', 'score_fidc', 'rating_carteira']
     if 'prob_ml_bom' in df_full.columns:
@@ -200,7 +204,7 @@ def calcular_perfil_beneficiario(
         perfil['desvio_score_aws'] = perfil['score_medio_carteira'] - perfil['score_historico_aws']
     else:
         perfil['score_historico_aws'] = np.nan
-        perfil['desvio_score_aws'] = 0.0
+        perfil['desvio_score_aws'] = np.nan
 
     return perfil.sort_values('qtd_cnpjs_cedidos', ascending=False).reset_index(drop=True)
 
@@ -336,18 +340,18 @@ def agregar_boletos(df_bol: pd.DataFrame) -> pd.DataFrame:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def definir_target(df_full: pd.DataFrame,
-                   df_bol_marcado: pd.DataFrame = None,
-                   liq_thresh: float = 0.65,
-                   mat_thresh: float = 800):
+                   df_bol_marcado: pd.DataFrame = None):
     """
     Target baseado em histórico REAL de pagamento dos boletos (sem leakage).
 
-    Target = 1 (ADIMPLENTE) se o sacado não tem nenhum boleto inadimplente real.
+    Target = 1 (ADIMPLENTE) se o sacado tem boletos e nenhum é inadimplente real.
+    Target = 0 se tem ao menos um boleto inadimplente real.
+    Target vazio (NaN) se o sacado não tem boletos — não entra no treino.
     Inadimplente real = vlr_baixa nulo ou zero, excluindo cancelamentos comerciais:
       - '5 - Baixa integral por solicitacao do cedente'
       - '8 - Baixa integral por solicitacao da instituicao destinataria'
 
-    Fallback: se df_bol_marcado não disponível, usa regra anterior (2 de 3).
+    Levanta ValueError se df_bol_marcado não estiver disponível.
     """
     df = df_full.copy()
 
@@ -366,8 +370,10 @@ def definir_target(df_full: pd.DataFrame,
                                             'inadimplente_real': '_n_inad'}))
 
         df = df.merge(inad_por_pag, on='id_cnpj', how='left')
-        df['_n_inad'] = df['_n_inad'].fillna(0)
-        df['target']  = (df['_n_inad'] == 0).astype(int)
+        # Sem boletos não há evidência de adimplência: target fica vazio (NaN)
+        # e o CNPJ é excluído do treino e das contagens de adimplência.
+        df['target'] = np.where(df['_n_inad'].isna(), np.nan,
+                                (df['_n_inad'] == 0).astype(float))
         df.drop(columns=['_n_inad'], inplace=True)
 
         pct = df['target'].mean() * 100
@@ -421,7 +427,8 @@ def _make_pipeline(model) -> Pipeline:
     ])
 
 
-def treinar_modelos_duas_etapas(df_full: pd.DataFrame, avail: list, test_size: float = 0.2, n_estimators: int = 100):
+def treinar_modelos_duas_etapas(df_full: pd.DataFrame, avail: list,
+                                test_size: float = 0.2):
     """
     Hurdle Model em Duas Etapas:
       Etapa 1: Classificação (Probabilidade de Adimplência / Score FIDC)
@@ -461,16 +468,26 @@ def treinar_modelos_duas_etapas(df_full: pd.DataFrame, avail: list, test_size: f
 
     # 2. ETAPA DE REGRESSÃO (Subset Liquidado: target == 1)
     df_reg = df_full[(df_full['target'] == 1) & (df_full['media_atraso_dias'].notna())].copy()
+    reg_features = [feature for feature in avail if feature != 'media_atraso_dias']
     
     pipe_reg = None
+    reg_mae = None
     if len(df_reg) > 0:
-        X_reg = df_reg[avail]
+        X_reg = df_reg[reg_features]
         y_reg = df_reg['media_atraso_dias']
 
         if XGBOOST_AVAILABLE:
             mdl_reg = XGBRegressor(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42, n_jobs=1)
         else:
             mdl_reg = GradientBoostingRegressor(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42)
+
+        if len(df_reg) >= 5:
+            X_reg_tr, X_reg_te, y_reg_tr, y_reg_te = train_test_split(
+                X_reg, y_reg, test_size=test_size, random_state=42
+            )
+            validation_pipe = _make_pipeline(mdl_reg)
+            validation_pipe.fit(X_reg_tr, y_reg_tr)
+            reg_mae = mean_absolute_error(y_reg_te, validation_pipe.predict(X_reg_te))
 
         pipe_reg = _make_pipeline(mdl_reg)
         pipe_reg.fit(X_reg, y_reg)
@@ -485,6 +502,9 @@ def treinar_modelos_duas_etapas(df_full: pd.DataFrame, avail: list, test_size: f
         nome_modelo: {
             'pipe': pipe_clf,
             'pipe_reg': pipe_reg,
+            'reg_features': reg_features,
+            'reg_mae': reg_mae,
+            'reg_n_samples': len(df_reg),
             'auc': auc_val,
             'ap': average_precision_score(y_te_c, y_proba),
             'y_pred': y_pred,
@@ -525,15 +545,11 @@ def calcular_prob_ml(df_full: pd.DataFrame,
                      avail: list,
                      best_name: str) -> pd.DataFrame:
     df   = df_full.copy()
-    pipe = ml_results[best_name].get('pipe_calibrated', ml_results[best_name]['pipe'])
+    pipe = ml_results[best_name]['pipe']
 
-    X_todos    = df[avail].copy()
-    idx_validos = X_todos.dropna().index
-
-    prob = np.zeros(len(df))
-    if len(idx_validos) > 0:
-        probs = pipe.predict_proba(X_todos.loc[idx_validos])
-        prob[df.index.get_indexer(idx_validos)] = probs[:, 1]
+    # Variáveis vazias são imputadas pela mediana do treino (SimpleImputer do
+    # próprio pipeline), então todos os CNPJs recebem probabilidade do modelo.
+    prob = pipe.predict_proba(df[avail])[:, 1]
 
     df['prob_ml_bom'] = (prob * 100).round(1)
 
@@ -633,17 +649,22 @@ def calcular_cobertura_carteira(df_full: pd.DataFrame,
     # Valores
     vlr_total = float(df_cart['vlr_nominal'].sum()) if 'vlr_nominal' in df_cart.columns else 0
     sem_hist_ids = cnpjs_cart - tem_hist
-    vlr_sem = float(df_cart[df_cart[col_pag].astype(str).isin(sem_hist_ids)]['vlr_nominal'].sum())               if 'vlr_nominal' in df_cart.columns else 0
+    vlr_sem = (
+        float(df_cart[df_cart[col_pag].astype(str).isin(sem_hist_ids)]['vlr_nominal'].sum())
+        if 'vlr_nominal' in df_cart.columns else 0
+    )
 
-    print(f"[SafeAsset] Cobertura — {n_com:,} com histórico ({n_com/total*100:.1f}%) · "
-          f"{n_sem:,} sem histórico ({n_sem/total*100:.1f}%)")
+    pct_com = round(n_com / total * 100, 1) if total else 0
+    pct_sem = round(n_sem / total * 100, 1) if total else 0
+    print(f"[SafeAsset] Cobertura — {n_com:,} com histórico ({pct_com:.1f}%) · "
+          f"{n_sem:,} sem histórico ({pct_sem:.1f}%)")
 
     return {
         'total_cnpjs':        total,
         'com_historico':      n_com,
         'sem_historico':      n_sem,
-        'pct_com_historico':  round(n_com/total*100, 1) if total else 0,
-        'pct_sem_historico':  round(n_sem/total*100, 1) if total else 0,
+        'pct_com_historico':  pct_com,
+        'pct_sem_historico':  pct_sem,
         'recomendados':       n_rec,
         'atencao':            n_atc,
         'nao_recomendados':   n_nrec,
@@ -656,8 +677,7 @@ def calcular_cobertura_carteira(df_full: pd.DataFrame,
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
-                 test_size: float = 0.2, n_estimators: int = 100,
-                 liq_thresh: float = 0.65, mat_thresh: float = 800,
+                 test_size: float = 0.2,
                  pct_dup_thresh: float = FRAUDE_PCT_DUP_THRESH,
                  n_emitentes_thresh: int = FRAUDE_N_EMITENTES_THRESH) -> dict:
     """Pipeline histórico — roda sempre com base auxiliar + boletos históricos.
@@ -703,13 +723,13 @@ def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
           f"  sem: {n_sem:,} ({pct_sem:.1f}%)")
 
     # Passo 5 — target baseado em adimplência real dos boletos
-    df_full, p75       = definir_target(df_full, df_bol_marcado, liq_thresh, mat_thresh)
+    df_full, p75       = definir_target(df_full, df_bol_marcado)
     result['p75_atraso'] = p75
     result['corr_matrix'] = calcular_correlacao(df_full)
 
     # Passos 7-8 — modelagem ML
     avail = [f for f in FEATURES if f in df_full.columns]
-    ml_results, X_test, y_test = treinar_modelos_duas_etapas(df_full, avail, test_size, n_estimators)
+    ml_results, X_test, y_test = treinar_modelos_duas_etapas(df_full, avail, test_size)
 
     result['ml']          = ml_results
     result['X_test']      = X_test
@@ -725,6 +745,13 @@ def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
 
     # Produto 2 — score ML auxiliar
     df_full = calcular_prob_ml(df_full, ml_results, avail, best_name)
+
+    # Hurdle — atraso esperado composto (classificação + regressão)
+    df_full = calcular_atraso_esperado_composto(
+        df_full, ml_results[best_name]['pipe'],
+        ml_results[best_name].get('pipe_reg'), avail,
+        reg_features=ml_results[best_name].get('reg_features')
+    )
     result['df_full'] = df_full
 
     # Perfil setorial por CNAE
@@ -735,20 +762,26 @@ def run_pipeline(df_aux: pd.DataFrame, df_bol: pd.DataFrame,
 
     return result
 
-def calcular_atraso_esperado_composto(df_full: pd.DataFrame, pipe_clf, pipe_reg, avail: list, penalidade_default: float = 90.0) -> pd.DataFrame:
+def calcular_atraso_esperado_composto(
+    df_full: pd.DataFrame,
+    pipe_clf,
+    pipe_reg,
+    avail: list,
+    penalidade_default: float = 90.0,
+    reg_features: list = None,
+) -> pd.DataFrame:
     df = df_full.copy()
     X = df[avail].copy()
-    
-    # Fillna com a mediana para a predição
-    imputer = SimpleImputer(strategy='median')
-    X_imp = imputer.fit_transform(X)
-    
+
+    # Os pipelines aplicam a imputação aprendida no conjunto de treino.
     # Probabilidade de Adimplência
-    prob_adim = pipe_clf.predict_proba(X_imp)[:, 1]
+    prob_adim = pipe_clf.predict_proba(X)[:, 1]
     
     # Previsão de Dias de Atraso (se for adimplente)
     if pipe_reg is not None:
-        dias_pred = pipe_reg.predict(X_imp)
+        if reg_features is None:
+            reg_features = [feature for feature in avail if feature != 'media_atraso_dias']
+        dias_pred = pipe_reg.predict(df[reg_features])
         dias_pred = np.clip(dias_pred, 0, None)  # Não permite atrasos negativos
     else:
         dias_pred = np.zeros(len(df))

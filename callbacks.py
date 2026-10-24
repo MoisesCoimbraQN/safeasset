@@ -351,14 +351,13 @@ def register_callbacks(app):
         State('store-raw-aux',   'data'),
         State('store-raw-bol',   'data'),
         State('sl-test',  'value'),
-        State('sl-trees', 'value'),
         State('sl-dup-thresh',  'value'),
         State('sl-emit-thresh', 'value'),
         prevent_initial_call=True,
     )
     def processar_historico(run_clicks, run_upload_clicks, ml_clicks, fraud_clicks,
                             aux_json_input, bol_json,
-                            test_size, n_trees, dup_thresh, emit_thresh):
+                            test_size, dup_thresh, emit_thresh):
 
         from dash.exceptions import PreventUpdate
 
@@ -402,9 +401,6 @@ def register_callbacks(app):
             R = pl.run_pipeline(
                 df_aux.copy(), df_bol.copy(),
                 test_size          = test_size  or 0.2,
-                n_estimators       = n_trees    or 300,
-                liq_thresh         = 0.65,
-                mat_thresh         = 800,
                 pct_dup_thresh     = (dup_thresh  or 5)  / 100,
                 n_emitentes_thresh = emit_thresh or 10,
             )
@@ -418,15 +414,7 @@ def register_callbacks(app):
                                 'padding': '12px', 'borderRadius': '6px', 'overflow': 'auto'}),
             ], style={'padding': '24px'}), '', None
 
-        # Após treinar os modelos e ter a lista de features (avail):
-        pipe_clf = R['ml'][R['best_name']]['pipe']
-        pipe_reg = R['ml'][R['best_name']].get('pipe_reg')
-
-        # Adiciona as colunas no DataFrame principal (df_full)
-        R['df_full'] = pl.calcular_atraso_esperado_composto(
-            R['df_full'], pipe_clf, pipe_reg, R['avail_feats']
-        )
-
+        # Atraso esperado composto já é calculado dentro de pl.run_pipeline()
         run_id = st.novo_run_id()
 
         # Retreinou — carteira nova anterior fica obsoleta contra o modelo
@@ -449,8 +437,7 @@ def register_callbacks(app):
         _PIPELINE_CACHE['df_bol_raw'] = df_bol
 
         # ── Montar dashboard ──────────────────────────────────────────────
-        dashboard = build_dashboard(R, 0.65, 800,
-                                     dup_thresh  or 0.05,
+        dashboard = build_dashboard(R, dup_thresh  or 0.05,
                                      emit_thresh or 10)
         df_full_json = R['df_full'].to_json(date_format='iso', orient='split')
 
@@ -515,8 +502,7 @@ def register_callbacks(app):
         # — só a visão de CNPJs exibida muda, nada é recalculado do zero.
         R_view = dict(R_base)
         R_view['df_full'] = df_full
-        dashboard = build_dashboard(R_view, 0.65, 800,
-                                     dup_thresh  or 0.05,
+        dashboard = build_dashboard(R_view, dup_thresh  or 0.05,
                                      emit_thresh or 10)
         df_full_json = df_full.to_json(date_format='iso', orient='split')
         return dashboard, '', df_full_json
@@ -560,8 +546,7 @@ def register_callbacks(app):
             daemon=True,
         ).start()
 
-        dashboard = build_dashboard(R, 0.65, 800,
-                                     dup_thresh  or 0.05,
+        dashboard = build_dashboard(R, dup_thresh  or 0.05,
                                      emit_thresh or 10)
         df_full_json = R['df_full'].to_json(date_format='iso', orient='split')
         return dashboard, '', df_full_json
@@ -1221,8 +1206,8 @@ def register_callbacks(app):
 # MONTAGEM DO DASHBOARD (chamado dentro do callback principal)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
-                    dup_thresh: float = 0.05, emit_thresh: int = 10):
+def build_dashboard(R: dict, dup_thresh: float = 0.05,
+                    emit_thresh: int = 10):
     """
     Monta todo o conteúdo do dashboard a partir dos resultados do pipeline.
     Usa charts.py para gerar os gráficos e layout.py para os componentes visuais.
@@ -1231,6 +1216,11 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
     df_bol       = R['df_bol']
     ml           = R['ml']
     best_name    = R['best_name']
+    reg_mae      = ml[best_name].get('reg_mae')
+    reg_mae_label = (
+        f'MAE do atraso no holdout: {reg_mae:.1f} dias'
+        if reg_mae is not None else 'MAE do atraso indisponível (amostra insuficiente)'
+    )
     feat_imp     = R['feat_imp']
     corr_mat     = R['corr_matrix']
     fraude       = R['fraude']
@@ -1616,8 +1606,14 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                                     'color': ACCENT2, 'marginBottom': '16px',
                                     'borderLeft': f'4px solid {ACCENT2}',
                                     'paddingLeft': '10px'}),
-                    html.Div(f'Modelo Core: {best_name}  ·  AUC-ROC: {ml[best_name]["auc"]:.3f}  ·  Regressão de Prazos Aplicada',
+                    html.Div(f'Classificação: {best_name}  ·  AUC-ROC: {ml[best_name]["auc"]:.3f}  ·  Regressão: {reg_mae_label}',
                              style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '16px'}),
+                    html.Div('A validar pela empresa — as estimativas de atraso dependem da validação dos dados e das premissas do modelo.',
+                             style={'fontSize': '11px', 'fontWeight': '600',
+                                    'color': WARN, 'backgroundColor': '#FFF8E7',
+                                    'borderLeft': f'3px solid {WARN}',
+                                    'padding': '8px 12px', 'marginBottom': '12px',
+                                    'borderRadius': '4px'}),
                     dbc.Row([
                         dbc.Col(kpi('Probabilidade ML Média',
                             f'{df_full["prob_ml_bom"].mean():.1f}%',
@@ -1629,7 +1625,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                             ACCENT), width=3),
                         dbc.Col(kpi('Atraso Ponderado (Hurdle)',
                             f"{df_full['atraso_esperado_composto'].mean():.1f} dias",
-                            'Ajustado ao risco / Deságio FIDC',
+                            'Com penalidade fixa de 90 dias para inadimplência',
                             WARN), width=3),
                         dbc.Col(kpi('Alertas de Divergência',
                             f'{int(df_full["alerta_divergencia"].sum()):,}',
@@ -2078,20 +2074,39 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                 # ── TABELA FINAL DE CNPJs SUSPEITOS E BOTAO DE DOWNLOAD ──────────────────
                 card([
                     html.Div('CNPJs com flag de risco de fraude', style={'fontSize': '14px', 'fontWeight': '600', 'marginBottom': '12px', 'color': WARN}),
+                    html.Div('Ordenado pelo número absoluto de duplicatas. A proporção mostra duplicatas em relação ao total de boletos do sacado.',
+                             style={'fontSize': '11px', 'color': MUTED, 'marginBottom': '10px'}),
                     *([] if fraude_cnpj[fraude_cnpj['flag_risco_fraude'] == 1].empty else [
                         dash_table.DataTable(
                             data=fraude_cnpj[fraude_cnpj['flag_risco_fraude'] == 1]
-                                .sort_values('bol_pct_duplicado', ascending=False)
+                                .sort_values(
+                                    ['bol_qtd_dup_total', 'bol_pct_duplicado'],
+                                    ascending=False
+                                )
                                 [['id_pagador', 'bol_qtd_total', 'bol_qtd_dup_total',
                                   'bol_pct_duplicado', 'bol_n_emitentes', 'motivo_alerta']]
                                 .rename(columns={
                                     'id_pagador': 'CNPJ', 'bol_qtd_total': 'Total Bol.',
                                     'bol_qtd_dup_total': 'Duplicatas', 'bol_pct_duplicado': '% Dup.',
                                     'bol_n_emitentes': 'Emitentes', 'motivo_alerta': 'Motivo'})
-                                .assign(**{'% Dup.': lambda d: (d['% Dup.'] * 100).round(1).astype(str) + '%'})
+                                .assign(
+                                    **{
+                                        'Duplicatas / Total': lambda d: (
+                                            d['Duplicatas'].astype(int).astype(str)
+                                            + ' de '
+                                            + d['Total Bol.'].astype(int).astype(str)
+                                        ),
+                                        '% Dup.': lambda d: (
+                                            (d['% Dup.'] * 100).round(1).astype(str) + '%'
+                                        ),
+                                    }
+                                )
+                                [['CNPJ', 'Duplicatas / Total', '% Dup.',
+                                  'Emitentes', 'Motivo']]
                                 .to_dict('records'),
                             columns=[{'name': c, 'id': c} for c in
-                                     ['CNPJ', 'Total Bol.', 'Duplicatas', '% Dup.', 'Emitentes', 'Motivo']],
+                                     ['CNPJ', 'Duplicatas / Total', '% Dup.',
+                                      'Emitentes', 'Motivo']],
                             page_size=15, sort_action='native',
                             style_table={'overflowX': 'auto'},
                             style_cell={'backgroundColor': CARD_BG, 'color': WHITE,
@@ -2571,7 +2586,7 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
 
                         section_title('7–8. Modelagem Preditiva', 'Pipeline: Imputer → Scaler → Modelo · Cross-Validation k=5'),
                         card([
-                            html.Div('Comparação de Modelos — Métricas', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '12px'}),
+                            html.Div('Métricas do Modelo', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '12px'}),
                             dash_table.DataTable(
                                 data=[{'Modelo': n, 'CV AUC (treino)': f"{r['cv_mean']:.4f} ± {r['cv_std']:.4f}",
                                        'Test AUC': f"{r['auc']:.4f}", 'Test AP': f"{r['ap']:.4f}"}
@@ -2588,10 +2603,10 @@ def build_dashboard(R: dict, liq_thresh: float, mat_thresh: float,
                         ]),
 
 card([html.Div('AUC-ROC por Fold — Cross-Validation (k=5)', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_cv_folds(ml))]),
-                        card([html.Div('CV AUC vs Test AUC — comparação entre modelos', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_cv_vs_test(ml))]),
+                        card([html.Div('CV AUC vs Test AUC — validação cruzada x conjunto de teste', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_cv_vs_test(ml))]),
                         card([html.Div(f'Importância das Features — {best_name}', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}), G(ch.fig_feature_importance(feat_imp, best_name))]),
                         html.Hr(style={'borderColor': BORDER, 'margin': '20px 0'}),
-                        section_title('Avaliação dos Modelos — Hurdle Model', 'Curvas ROC e Matrizes de Confusão'),
+                        section_title('Avaliação do Modelo — Hurdle Model', 'Curva ROC e Matriz de Confusão'),
 
                         # Bloco explicativo dos 2 Targets do Hurdle Model
                         html.Div([
@@ -2605,7 +2620,7 @@ card([html.Div('AUC-ROC por Fold — Cross-Validation (k=5)', style={'fontSize':
                         # Layout em colunas lado a lado para ROC e Matriz de Confusão
                         dbc.Row([
                             dbc.Col(card([
-                                html.Div('Curvas ROC — Comparação entre Modelos', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
+                                html.Div('Curva ROC — Classificação de Adimplência', style={'fontSize': '13px', 'color': MUTED, 'marginBottom': '8px'}),
                                 G(ch.fig_roc(ml))
                             ]), width=6),
                             

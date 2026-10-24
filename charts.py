@@ -423,13 +423,15 @@ def fig_cnpjs_por_cnae(perfil_cnae: pd.DataFrame, top_n: int = 7) -> go.Figure:
         text=[f"{v:,} CNPJs" for v in df['qtd_cnpjs']],
         textposition='outside',
         textfont=dict(size=11, color=WHITE),
-        customdata=df[['score_medio', 'pct_suspeitos', 'rating_predominante']].values,
+        customdata=df[['score_medio', 'qtd_cnpjs_suspeitos',
+                       'pct_suspeitos', 'rating_predominante']].values,
         hovertemplate=(
             "<b>%{y}</b><br>"
             "CNPJs: %{x:,}<br>"
             "Score médio: %{customdata[0]}<br>"
-            "Suspeitos: %{customdata[1]:.1f}%<br>"
-            "Rating predominante: %{customdata[2]}<extra></extra>"
+            "CNPJs suspeitos: %{customdata[1]:,.0f} de %{x:,.0f} "
+            "(%{customdata[2]:.1f}%)<br>"
+            "Rating predominante: %{customdata[3]}<extra></extra>"
         ),
     ))
     return _fig(fig, height=max(340, top_n * 52),
@@ -490,12 +492,14 @@ def fig_score_por_cnae(perfil_cnae: pd.DataFrame, top_n: int = 7) -> go.Figure:
               for q, s in zip(qtd, df['score_medio'])],
         textposition='middle right',
         textfont=dict(size=11, color=WHITE),
-        customdata=list(zip(df['denominacao'], df['rating_predominante'], susp, qtd)),
+        customdata=list(zip(df['denominacao'], df['rating_predominante'],
+                            df['qtd_cnpjs_suspeitos'], susp, qtd)),
         hovertemplate=(
             "<b>%{customdata[0]}</b><br>"
             "Score FIDC médio: %{x:.0f}<br>"
-            "CNPJs: %{customdata[3]:,.0f}<br>"
-            "% suspeitos: %{customdata[2]:.1f}%<br>"
+            "CNPJs: %{customdata[4]:,.0f}<br>"
+            "CNPJs suspeitos: %{customdata[2]:,.0f} de %{customdata[4]:,.0f} "
+            "(%{customdata[3]:.1f}%)<br>"
             "Rating predominante: %{customdata[1]}<extra></extra>"
         ),
         showlegend=False,
@@ -544,11 +548,12 @@ def fig_distribuicao_motivos_fraude(fraude_cnpj: pd.DataFrame) -> go.Figure:
 
 
 def fig_top_cnpjs_suspeitos(fraude_cnpj: pd.DataFrame, top_n: int = 15) -> go.Figure:
-    """Barras horizontais dos CNPJs com maior % de boletos duplicados."""
+    """Barras dos CNPJs com mais duplicatas, mostrando a proporção na carteira."""
     df = (fraude_cnpj[fraude_cnpj['bol_pct_duplicado'] > 0]
-          .nlargest(top_n, 'bol_pct_duplicado')
+          .sort_values(['bol_qtd_dup_total', 'bol_pct_duplicado'],
+                       ascending=False)
+          .head(top_n)
           .copy())
-    df['pct_label'] = (df['bol_pct_duplicado'] * 100).round(1)
     colors = [WARN if f == 1 else ACCENT for f in df['flag_risco_fraude']]
     fig = go.Figure(go.Bar(
         x=df['bol_pct_duplicado'] * 100,
@@ -556,9 +561,18 @@ def fig_top_cnpjs_suspeitos(fraude_cnpj: pd.DataFrame, top_n: int = 15) -> go.Fi
         orientation='h',
         marker_color=colors,
         opacity=.85,
-        text=[f"{v:.1f}%" for v in df['bol_pct_duplicado'] * 100],
+        text=[f"{d:,} de {t:,} ({p:.1f}%)"
+              for d, t, p in zip(df['bol_qtd_dup_total'],
+                                 df['bol_qtd_total'],
+                                 df['bol_pct_duplicado'] * 100)],
         textposition='outside',
         textfont=dict(size=10, color=WHITE),
+        customdata=df[['bol_qtd_dup_total', 'bol_qtd_total']].values,
+        hovertemplate=(
+            "<b>%{y}</b><br>"
+            "Duplicatas: %{customdata[0]:,.0f} de %{customdata[1]:,.0f} "
+            "(%{x:.1f}%)<extra></extra>"
+        ),
     ))
     return _fig(fig, height=max(320, top_n * 24), margin=dict(l=200, r=60, t=20, b=50),
                 xaxis_title='% de boletos duplicados',
